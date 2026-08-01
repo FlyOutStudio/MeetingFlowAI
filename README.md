@@ -15,6 +15,8 @@ MeetingFlowAIは、会議のマイク音声をリアルタイムで文字起こ�
 - 部門・担当者、アクション、次工程を保持する構造化業務フロー
 - 構造化フローを正本として生成するMermaid `flowchart TD`
 - Markdown（`.md`）、Mermaid（`.mmd`）、JSONの書き出し
+- アプリ内設定からOpenAI APIキーをmacOS Keychainへ保存・更新・削除
+- GitHub ReleasesからダウンロードできるUniversal `.app` ZIP
 - 文字起こし確定後の一時録音ファイル自動削除
 - 処理のキャンセル、エラー表示、ダークモード
 
@@ -37,7 +39,7 @@ MeetingFlowAIは、会議のマイク音声をリアルタイムで文字起こ�
 ## 動作環境と音声認識
 
 - macOS 15以上
-- Xcode 26以上（必須）
+- Xcode 26以上（ソースからビルドする場合）
 - Swift 6 / SwiftUI / Swift Concurrency
 
 Speech FrameworkのAPI可用性に合わせ、実行時に音声認識方式を切り替えます。
@@ -49,17 +51,28 @@ Speech FrameworkのAPI可用性に合わせ、実行時に音声認識方式を�
 
 デプロイ対象はmacOS 15ですが、`SpeechAnalyzer`を含むすべてのコードをビルドするため、Xcode 26以降を使用してください。macOS 15〜25では新APIを呼ばず、レガシー実装へ分岐します。macOS 26でも端末が`SpeechTranscriber`に対応しない場合は互換実装へフォールバックします。
 
-## セットアップ
+## MacBook Airで使う
+
+1. Private repositoryへログインできるGitHubアカウントで、[Releases](https://github.com/FlyOutStudio/MeetingFlowAI/releases)から`MeetingFlowAI-macOS.zip`をダウンロードします。
+2. ZIPを展開し、`MeetingFlowAI.app`をApplicationsフォルダへ移動します。
+3. アプリを一度開いて警告を閉じます。
+4. システム設定 > プライバシーとセキュリティで「このまま開く」を選び、再確認画面の「開く」を選びます。
+5. アプリの「APIキー設定」を開き、自分のOpenAI APIキーを入力して「Keychainへ保存」を選びます。
+6. 録音開始時に、マイクと音声認識へのアクセスを許可します。
+
+初回許可後は、Finderから通常どおりダブルクリックして起動できます。APIキーもログインKeychainから読み込むため、TerminalやXcodeは不要です。Appleの現行手順は[Macでアプリを安全に開く](https://support.apple.com/ja-jp/102445)で確認できます。
+
+> [!WARNING]
+> 配布ZIPは無料運用のためAd Hoc署名であり、AppleのDeveloper ID署名やNotarizationではありません。入手元がこのPrivate repositoryのReleaseであることを確認した場合だけ「このまま開く」を許可してください。
+
+## ソースから開発する
 
 1. リポジトリを取得し、`MeetingFlowAI.xcodeproj`をXcodeで開きます。
 2. `MeetingFlowAI`ターゲットのSigning & Capabilitiesで、ご自身のDevelopment Teamと必要に応じてBundle Identifierを設定します。
-3. Product > Scheme > Manage Schemesを開き、`MeetingFlowAI`を複製して`MeetingFlowAI-Local`などの名前を付けます。
-4. 複製したSchemeのSharedチェックを外し、個人用Schemeとして保存します。
-5. 個人用Schemeを選び、Edit Scheme > Run > Argumentsを開きます。
-6. Environment Variablesへ`OPENAI_API_KEY`を追加し、開発用APIキーを入力してチェックを有効にします。
-7. 実行先にMy Macを選択して実行します。
+3. 実行先にMy Macを選択して実行します。
+4. アプリの「APIキー設定」からキーをKeychainへ保存します。
 
-共有Schemeには環境変数を登録していません。個人用Schemeは`xcuserdata`配下に保存されるため、APIキーを含むSchemeを共有・コミットしないでください。アプリは次の環境変数からキーを読み取ります。
+開発時だけは、個人用SchemeのEnvironment Variablesへ次の値を追加する方法も利用できます。Keychain保存値がある場合はそちらを優先します。共有Schemeへ秘密値を登録しないでください。
 
 ```text
 OPENAI_API_KEY=your-development-key
@@ -107,13 +120,51 @@ swift test
 
 マイク、音声認識の権限、App Sandboxを含む実アプリの動作確認にはXcodeでビルドした`.app`を使用してください。
 
+## GitHub Actionsでの個人配布
+
+`.github/workflows/macos-release.yml`は、Apple Developer Programの証明書やRepository Secretsを使わずに配布用ZIPを作成します。実行経路は、Actions画面からの手動実行と`v`で始まるタグのpushだけです。
+
+ワークフローは次の処理を行います。
+
+1. GitHub-hostedの`macos-26` runnerとXcode 26でユニットテスト
+2. Intel／Apple Silicon両対応のUniversal Release build
+3. `Configuration/MeetingFlowAI.entitlements`を埋め込んだAd Hoc署名
+4. 2アーキテクチャ、App Sandbox権限、Hardened Runtime、署名を検証
+5. `ditto`による`MeetingFlowAI-macOS.zip`の作成
+6. ZIPを14日間保持するworkflow artifactとして保存
+
+手動ビルドでは、GitHubのActionsタブから「Build macOS Release」を選び、「Run workflow」を実行します。完了後、workflow runのArtifactsから`MeetingFlowAI-macOS.zip`を取得できます。
+
+リリースを作成する場合は、次のように`v`で始まるタグをpushします。
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+タグのビルドに成功すると、GitHub Releaseが自動生成され、同じZIPがRelease assetとして添付されます。Release作成にはGitHubがJobごとに発行する`GITHUB_TOKEN`だけを使うため、Personal Access Tokenの登録は不要です。Private repositoryでも動作しますが、Actionsの実行時間とartifact storageは利用中のGitHubプランの割当対象です。
+
+### 配布ZIPの署名と初回起動
+
+この無料配布用ZIPはAd Hoc署名であり、Developer ID署名やAppleのNotarizationではありません。コード改変の検出とApp Sandboxの適用には署名を使いますが、配布者の身元をGatekeeperへ証明するものではないため、初回起動時に「開発元を確認できない」「Appleは悪意のあるソフトウェアかどうかを確認できない」旨の警告が表示されます。
+
+信頼できるrepositoryまたはReleaseから取得したことを確認したうえで、次の手順で初回だけ許可します。
+
+1. ZIPを展開し、`MeetingFlowAI.app`をApplicationsフォルダへ移動します。
+2. アプリを一度開き、macOSがブロックしたことを確認してダイアログを閉じます。
+3. システム設定 > プライバシーとセキュリティを開き、下へスクロールして「このまま開く」（Open Anyway）を選びます。
+4. 再表示された確認画面で「開く」を選びます。
+
+この操作は、入手元と内容を信頼できる場合だけ行ってください。配布物に`OPENAI_API_KEY`は含まれません。初回起動後にアプリの設定画面から入力し、macOSのログインKeychainへ保存します。保存済みの秘密値を画面へ再表示したり、ソースコードや設定ファイルへ書き込んだりしません。
+
 ## 使い方
 
-1. 会議タイトルを入力します。
-2. Startで録音とリアルタイム文字起こしを開始します。
-3. Stopで録音を終了します。
-4. 文字起こしがOpenAI Responses APIへ送られ、解析が終わると「議事録」「ToDo」「業務フロー」「Mermaid」の各タブが表示されます。
-5. MermaidタブのCopyでソースをコピーするか、Exportでファイルを保存します。
+1. 初回だけ「APIキー設定」でOpenAI APIキーをKeychainへ保存します。
+2. 会議タイトルを入力します。
+3. Startで録音とリアルタイム文字起こしを開始します。
+4. Stopで録音を終了します。
+5. 文字起こしがOpenAI Responses APIへ送られ、解析が終わると「議事録」「ToDo」「業務フロー」「Mermaid」の各タブが表示されます。
+6. MermaidタブのCopyでソースをコピーするか、Exportでファイルを保存します。
 
 AI解析中の処理はキャンセルできます。通信、権限、APIキー、構造化レスポンスの問題は画面上にエラーとして表示されます。
 
@@ -131,7 +182,12 @@ AI解析中の処理はキャンセルできます。通信、権限、APIキー
 
 ```text
 MeetingFlowAI/
+├── .github/
+│   └── workflows/
+│       └── macos-release.yml
 ├── Package.swift
+├── Scripts/
+│   └── build-release.sh
 ├── Configuration/
 │   └── MeetingFlowAI.entitlements
 ├── MeetingFlowAI.xcodeproj/
@@ -151,12 +207,11 @@ MVVMを基本に、録音、音声認識、AI解析、Exportをプロトコル�
 
 ## APIキーを扱う際の重要事項
 
-環境変数はローカル開発には適していますが、一般ユーザーへ配布するアプリの秘密保持手段にはなりません。APIキーをアプリ本体、`Info.plist`、Scheme、ソースコード、設定ファイルへ埋め込むと、配布物から抽出できます。
+APIキーは利用者がアプリ内で入力し、macOSのログインKeychainへ保存します。保存済みキーは画面へ再表示せず、AI解析リクエストの直前にだけ読み込みます。APIキーをアプリ本体、`Info.plist`、共有Scheme、ソースコード、設定ファイルへ埋め込むと配布物から抽出できるため、この構成では採用していません。
 
-配布版では、次のいずれかの構成に変更してください。
+複数利用者へ本格的に配布する場合は、利用者個人のAPIキーではなく、次の構成を検討してください。
 
 - 自社バックエンド／プロキシでOpenAI APIを呼び、アプリには短命な認証トークンだけを渡す
-- ユーザー自身のAPIキーを入力してもらい、Keychainへ保存する
 
 いずれの場合も、利用者認証、レート制限、失効、ログからの機密情報除外を設計してください。会議内容は機密情報を含む可能性があるため、組織のデータ取扱方針とOpenAI側の設定を確認してから利用してください。
 

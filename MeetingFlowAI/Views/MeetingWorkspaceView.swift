@@ -132,6 +132,11 @@ private struct ControlPanelView: View {
 
       Spacer()
 
+      SettingsLink {
+        Label("APIキー設定", systemImage: "key")
+      }
+      .buttonStyle(.link)
+
       Text("録音停止後は会議タイトルと文字起こしテキストだけをOpenAIへ送信します。一時録音は処理後に自動削除されます。")
         .font(.caption)
         .foregroundStyle(.secondary)

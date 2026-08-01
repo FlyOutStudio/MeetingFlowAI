@@ -1,8 +1,31 @@
+import Foundation
 import SwiftUI
 
 @main
+@MainActor
 struct MeetingFlowAIApp: App {
-  @StateObject private var viewModel = MeetingViewModel()
+  @StateObject private var viewModel: MeetingViewModel
+  @StateObject private var settingsViewModel: APIKeySettingsViewModel
+
+  init() {
+    let apiKeyStore = KeychainAPIKeyStore()
+    let analysisService = OpenAIService(apiKeyProvider: {
+      if let storedKey = try await apiKeyStore.loadAPIKey() {
+        return storedKey
+      }
+
+      // Xcodeからの開発実行では、従来どおり個人用Schemeの環境変数も
+      // 利用できます。Finder起動の配布版はKeychainを使用します。
+      return ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
+    })
+
+    _viewModel = StateObject(
+      wrappedValue: MeetingViewModel(analysisService: analysisService)
+    )
+    _settingsViewModel = StateObject(
+      wrappedValue: APIKeySettingsViewModel(apiKeyStore: apiKeyStore)
+    )
+  }
 
   var body: some Scene {
     WindowGroup {
@@ -11,22 +34,7 @@ struct MeetingFlowAIApp: App {
     .defaultSize(width: 1_180, height: 780)
 
     Settings {
-      SettingsView()
+      APIKeySettingsView(viewModel: settingsViewModel)
     }
-  }
-}
-
-private struct SettingsView: View {
-  var body: some View {
-    Form {
-      LabeledContent("AIモデル", value: "gpt-5.5")
-      LabeledContent("APIキー", value: "環境変数 OPENAI_API_KEY")
-      Text("APIキーはアプリ内へ保存せず、個人用Xcode SchemeのEnvironment Variablesから読み取ります。")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
-    .formStyle(.grouped)
-    .padding()
-    .frame(width: 460)
   }
 }

@@ -6,10 +6,11 @@ protocol MeetingAnalysisGenerating: Sendable {
 
 /// 会議の文字起こしをOpenAI Responses APIで構造化します。
 ///
-/// APIキーは既定ではプロセス環境変数からのみ取得します。テスト時は
-/// `apiKeyProvider`と`URLSession`を注入でき、本番の資格情報を使いません。
+/// APIキーは非同期providerから取得します。本番ではKeychainを優先し、
+/// Xcode開発時だけ環境変数へフォールバックします。テスト時はproviderと
+/// `URLSession`を注入でき、本番の資格情報を使いません。
 actor OpenAIService: MeetingAnalysisGenerating {
-  typealias APIKeyProvider = @Sendable () -> String?
+  typealias APIKeyProvider = @Sendable () async throws -> String?
 
   private static let defaultEndpoint = URL(
     string: "https://api.openai.com/v1/responses"
@@ -38,8 +39,21 @@ actor OpenAIService: MeetingAnalysisGenerating {
       throw AppError.invalidResponse("解析する会議内容がありません。")
     }
 
+    let providedAPIKey: String?
+    do {
+      providedAPIKey = try await apiKeyProvider()
+    } catch is CancellationError {
+      throw AppError.cancelled
+    } catch let error as AppError {
+      throw error
+    } catch {
+      throw AppError.keychain("APIキーを読み込めませんでした。")
+    }
+
+    try checkCancellation()
+
     guard
-      let apiKey = apiKeyProvider()?
+      let apiKey = providedAPIKey?
         .trimmingCharacters(in: .whitespacesAndNewlines),
       !apiKey.isEmpty
     else {
@@ -193,7 +207,7 @@ actor OpenAIService: MeetingAnalysisGenerating {
     switch statusCode {
     case 401, 403:
       return .openAI(
-        "OpenAI APIの認証に失敗しました。OPENAI_API_KEYを確認してください。"
+        "OpenAI APIの認証に失敗しました。保存したAPIキーを確認してください。"
       )
     case 408:
       return .openAI(

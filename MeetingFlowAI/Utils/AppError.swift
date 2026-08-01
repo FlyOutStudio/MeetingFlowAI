@@ -14,6 +14,7 @@ enum AppError: LocalizedError, Equatable, Sendable {
   case missingAPIKey
   case openAI(String)
   case invalidResponse(String)
+  case keychain(String)
   case export(String)
   case cancelled
 
@@ -37,6 +38,8 @@ enum AppError: LocalizedError, Equatable, Sendable {
       "AIによる会議分析に失敗しました。\(detail(message))"
     case .invalidResponse(let message):
       "AIから不正な応答を受信しました。\(detail(message))"
+    case .keychain(let message):
+      "APIキーをKeychainで処理できませんでした。\(detail(message))"
     case .export(let message):
       "ファイルの保存に失敗しました。\(detail(message))"
     case .cancelled:
@@ -53,9 +56,11 @@ enum AppError: LocalizedError, Equatable, Sendable {
     case .speechRecognitionPermissionDenied:
       "システム設定の「プライバシーとセキュリティ」>「音声認識」で、このアプリを許可してください。"
     case .missingAPIKey:
-      "XcodeのSchemeにあるEnvironment VariablesへOPENAI_API_KEYを追加してください。"
+      "アプリの「APIキー設定」を開き、OpenAI APIキーをKeychainへ保存してください。"
     case .speechRecognizerUnavailable:
       "ネットワーク接続を確認し、しばらく待ってから再試行してください。"
+    case .keychain:
+      "Macのログインキーチェーンがロックされていないか確認し、もう一度お試しください。"
     case .recording, .speech, .openAI, .invalidResponse, .export:
       "内容を確認して、もう一度お試しください。"
     case .cancelled:

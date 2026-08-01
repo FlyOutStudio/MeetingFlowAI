@@ -1,0 +1,66 @@
+name: Build macOS Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, sign, and package
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run unit tests
+        run: xcrun swift test --parallel
+
+      - name: Build and package Release app
+        run: >-
+          /bin/bash Scripts/build-release.sh
+          "$RUNNER_TEMP/MeetingFlowAI-DerivedData"
+          "$RUNNER_TEMP/MeetingFlowAI-Dist"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/MeetingFlowAI-Dist/MeetingFlowAI-macOS.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Attach asset to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packaged app
+        uses: actions/download-artifact@v8
+        with:
+          name: MeetingFlowAI-macOS.zip
+          path: dist
+          skip-decompress: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          dist/MeetingFlowAI-macOS.zip
+          --repo "$GITHUB_REPOSITORY"
+          --verify-tag
+          --generate-notes
+          --title "$GITHUB_REF_NAME"

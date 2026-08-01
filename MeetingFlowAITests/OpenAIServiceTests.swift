@@ -285,6 +285,48 @@ final class OpenAIServiceTests: XCTestCase {
     )
   }
 
+  func testAnalyzeMapsAPIKeyProviderFailureWithoutSendingRequest() async {
+    URLProtocolStub.handler = { _ in
+      XCTFail("APIキーを読み込めない場合は通信しないこと")
+      return Self.response(statusCode: 500, json: [:])
+    }
+
+    let service = OpenAIService(
+      session: session,
+      apiKeyProvider: {
+        throw AppError.keychain("テスト用の読み込み失敗")
+      }
+    )
+
+    await assertAppError(
+      from: {
+        try await service.analyze(title: "会議", transcript: "会議内容")
+      },
+      contains: "Keychain"
+    )
+  }
+
+  func testAnalyzeMapsAPIKeyProviderCancellation() async {
+    URLProtocolStub.handler = { _ in
+      XCTFail("キャンセルされた場合は通信しないこと")
+      return Self.response(statusCode: 500, json: [:])
+    }
+
+    let service = OpenAIService(
+      session: session,
+      apiKeyProvider: {
+        throw CancellationError()
+      }
+    )
+
+    await assertAppError(
+      from: {
+        try await service.analyze(title: "会議", transcript: "会議内容")
+      },
+      contains: "キャンセル"
+    )
+  }
+
   private func makeService(apiKey: String? = "test-api-key") -> OpenAIService {
     OpenAIService(
       session: session,

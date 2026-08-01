@@ -17,6 +17,10 @@ final class AppErrorTests: XCTestCase {
       "処理をキャンセルしました。"
     )
     XCTAssertEqual(
+      AppError.keychain("読み込み失敗").errorDescription,
+      "APIキーをKeychainで処理できませんでした。（読み込み失敗）"
+    )
+    XCTAssertEqual(
       AppError.permissionDenied("マイク").errorDescription,
       "マイクへのアクセスが許可されていません。"
     )
@@ -32,6 +36,10 @@ final class AppErrorTests: XCTestCase {
   func testPermissionErrorsHaveRecoverySuggestions() {
     XCTAssertNotNil(AppError.microphonePermissionDenied.recoverySuggestion)
     XCTAssertNotNil(AppError.speechRecognitionPermissionDenied.recoverySuggestion)
+    XCTAssertTrue(
+      AppError.missingAPIKey.recoverySuggestion?.contains("APIキー設定") == true
+    )
+    XCTAssertNotNil(AppError.keychain("失敗").recoverySuggestion)
     XCTAssertNil(AppError.cancelled.recoverySuggestion)
   }
 }
