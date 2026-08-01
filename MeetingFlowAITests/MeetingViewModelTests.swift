@@ -65,7 +65,7 @@ final class MeetingViewModelTests: XCTestCase {
     let recordingCounts = await recording.counts()
     XCTAssertEqual(recordingCounts.modes, [.onlineMeeting])
 
-    viewModel.cancelProcessing()
+    viewModel.stopRecording()
     try await waitUntil("テスト録音の後始末が完了しませんでした。") {
       viewModel.phase == .idle
     }
