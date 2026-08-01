@@ -30,8 +30,8 @@ actor KeychainAPIKeyStore: APIKeyStoring {
   private let keychain: any KeychainAccessing
 
   init(
-    service: String = Self.defaultService,
-    account: String = Self.defaultAccount,
+    service: String = KeychainAPIKeyStore.defaultService,
+    account: String = KeychainAPIKeyStore.defaultAccount,
     keychain: any KeychainAccessing = SecurityKeychainClient()
   ) {
     self.service = service

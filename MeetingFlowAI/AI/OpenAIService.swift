@@ -22,7 +22,7 @@ actor OpenAIService: MeetingAnalysisGenerating {
 
   init(
     session: URLSession = .shared,
-    endpoint: URL = Self.defaultEndpoint,
+    endpoint: URL = OpenAIService.defaultEndpoint,
     apiKeyProvider: @escaping APIKeyProvider = {
       ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
     }

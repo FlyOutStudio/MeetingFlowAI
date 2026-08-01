@@ -4,6 +4,34 @@
   import Foundation
   import Speech
 
+  /// AVAudioConverterの同期input blockへ1バッファだけを安全に渡します。
+  /// Xcode 26ではinput blockがSendableとして検査されるため、ローカルの可変値を
+  /// captureせず、ロックで保護した参照型に状態を閉じ込めます。
+  private final class ConverterInputSupplier: @unchecked Sendable {
+    private let lock = NSLock()
+    private var input: AVAudioPCMBuffer?
+
+    init(input: AVAudioPCMBuffer) {
+      self.input = input
+    }
+
+    func next(
+      inputStatus: UnsafeMutablePointer<AVAudioConverterInputStatus>
+    ) -> AVAudioBuffer? {
+      lock.lock()
+      defer { lock.unlock() }
+
+      guard let input else {
+        inputStatus.pointee = .noDataNow
+        return nil
+      }
+
+      self.input = nil
+      inputStatus.pointee = .haveData
+      return input
+    }
+  }
+
   /// macOS 26+ の長時間・オンデバイス文字起こし実装です。
   ///
   /// このファイルはmacOS 26 SDKを含むXcodeでのみコンパイルされます。Deployment
@@ -322,19 +350,13 @@
         AVAudioFrameCount(ceil(Double(input.frameLength) * rateRatio)) + 32,
         1
       )
-      var suppliedInput = false
+      let inputSupplier = ConverterInputSupplier(input: input)
 
       return try drainConverter(
         audioConverter,
         outputCapacity: capacity
       ) { _, inputStatus in
-        if suppliedInput {
-          inputStatus.pointee = .noDataNow
-          return nil
-        }
-        suppliedInput = true
-        inputStatus.pointee = .haveData
-        return input
+        inputSupplier.next(inputStatus: inputStatus)
       }
     }
 
