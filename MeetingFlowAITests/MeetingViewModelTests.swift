@@ -37,10 +37,38 @@ final class MeetingViewModelTests: XCTestCase {
 
     let recordingCounts = await recording.counts()
     XCTAssertEqual(recordingCounts.starts, 1)
+    XCTAssertEqual(recordingCounts.modes, [.microphone])
     XCTAssertEqual(recordingCounts.stops, 1)
     XCTAssertEqual(recordingCounts.discards, 1)
     let analysisCalls = await analysisService.numberOfCalls()
     XCTAssertEqual(analysisCalls, 1)
+  }
+
+  @MainActor
+  func testOnlineMeetingModeIsForwardedToRecordingService() async throws {
+    let recording = RecordingServiceStub()
+    let speech = SpeechServiceStub()
+    let analysisService = SequencedAnalysisService([])
+    let speechFactory = SpeechServiceFactoryStub([speech])
+    let viewModel = makeViewModel(
+      recording: recording,
+      analysis: analysisService,
+      speechFactory: speechFactory
+    )
+    viewModel.captureMode = .onlineMeeting
+
+    viewModel.startRecording()
+    try await waitUntil("オンライン会議モードで録音を開始できませんでした。") {
+      viewModel.phase == .recording
+    }
+
+    let recordingCounts = await recording.counts()
+    XCTAssertEqual(recordingCounts.modes, [.onlineMeeting])
+
+    viewModel.cancelProcessing()
+    try await waitUntil("テスト録音の後始末が完了しませんでした。") {
+      viewModel.phase == .idle
+    }
   }
 
   @MainActor
@@ -275,6 +303,7 @@ final class MeetingViewModelTests: XCTestCase {
 
 private struct RecordingServiceCounts: Sendable {
   let starts: Int
+  let modes: [MeetingCaptureMode]
   let stops: Int
   let discards: Int
   let cancels: Int
@@ -284,6 +313,7 @@ private actor RecordingServiceStub: RecordingServicing {
   private var continuation: AsyncThrowingStream<AudioSample, Error>.Continuation?
   private var currentURL: URL?
   private var startCount = 0
+  private var startedModes: [MeetingCaptureMode] = []
   private var stopCount = 0
   private var discardCount = 0
   private var cancelCount = 0
@@ -293,12 +323,13 @@ private actor RecordingServiceStub: RecordingServicing {
     self.cancelError = cancelError
   }
 
-  func startRecording() async throws -> RecordingSession {
+  func startRecording(mode: MeetingCaptureMode) async throws -> RecordingSession {
     guard continuation == nil else {
       throw AppError.recording("テスト録音はすでに開始済みです。")
     }
 
     startCount += 1
+    startedModes.append(mode)
     let url = URL(
       fileURLWithPath: "/private/tmp/meeting-flow-ai-test-\(startCount).caf"
     )
@@ -338,6 +369,7 @@ private actor RecordingServiceStub: RecordingServicing {
   func counts() -> RecordingServiceCounts {
     RecordingServiceCounts(
       starts: startCount,
+      modes: startedModes,
       stops: stopCount,
       discards: discardCount,
       cancels: cancelCount

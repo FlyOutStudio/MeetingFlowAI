@@ -2,7 +2,7 @@
 import Foundation
 
 protocol RecordingServicing: Sendable {
-  func startRecording() async throws -> RecordingSession
+  func startRecording(mode: MeetingCaptureMode) async throws -> RecordingSession
   func stopRecording() async throws -> URL?
   func discardRecording(at url: URL) async throws
   func cancelRecording() async throws
@@ -22,7 +22,10 @@ actor RecordingService: RecordingServicing {
   private var currentFileURL: URL?
   private var lifecycle: Lifecycle = .idle
 
-  func startRecording() async throws -> RecordingSession {
+  func startRecording(mode: MeetingCaptureMode) async throws -> RecordingSession {
+    guard mode == .microphone else {
+      throw AppError.recording("マイク録音サービスに不正な録音モードが指定されました。")
+    }
     guard case .idle = lifecycle else {
       throw AppError.recording("すでに録音中です。")
     }
@@ -61,7 +64,7 @@ actor RecordingService: RecordingServicing {
 
     let fileURL: URL
     do {
-      fileURL = try makeRecordingURL()
+      fileURL = try TemporaryRecordingStore.makeURL()
     } catch {
       throw AppError.recording("録音ファイルの保存先を準備できませんでした。")
     }
@@ -155,9 +158,7 @@ actor RecordingService: RecordingServicing {
   /// 構造化JSONであり、音声は処理完了後に端末へ残しません。
   func discardRecording(at url: URL) async throws {
     do {
-      if FileManager.default.fileExists(atPath: url.path) {
-        try FileManager.default.removeItem(at: url)
-      }
+      try TemporaryRecordingStore.discard(url)
       if currentFileURL == url {
         currentFileURL = nil
       }
@@ -184,36 +185,4 @@ actor RecordingService: RecordingServicing {
     return currentID == startID
   }
 
-  private func makeRecordingURL() throws -> URL {
-    let applicationSupport = try FileManager.default.url(
-      for: .applicationSupportDirectory,
-      in: .userDomainMask,
-      appropriateFor: nil,
-      create: true
-    )
-    let recordingsDirectory =
-      applicationSupport
-      .appendingPathComponent("MeetingFlowAI", isDirectory: true)
-      .appendingPathComponent("Recordings", isDirectory: true)
-
-    try FileManager.default.createDirectory(
-      at: recordingsDirectory,
-      withIntermediateDirectories: true
-    )
-
-    // アプリが異常終了した場合に残った一時録音も、次回開始時に回収します。
-    let staleRecordings = try FileManager.default.contentsOfDirectory(
-      at: recordingsDirectory,
-      includingPropertiesForKeys: nil
-    ).filter { $0.pathExtension.lowercased() == "caf" }
-    for staleRecording in staleRecordings {
-      try FileManager.default.removeItem(at: staleRecording)
-    }
-
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "yyyyMMdd-HHmmss"
-    let filename = "meeting-\(formatter.string(from: Date())).caf"
-    return recordingsDirectory.appendingPathComponent(filename)
-  }
 }

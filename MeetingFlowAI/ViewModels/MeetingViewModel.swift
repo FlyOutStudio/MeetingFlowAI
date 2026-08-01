@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class MeetingViewModel: ObservableObject {
   @Published var meetingTitle = ""
+  @Published var captureMode: MeetingCaptureMode = .microphone
   @Published private(set) var transcript = ""
   @Published private(set) var analysis: MeetingAnalysis?
   @Published private(set) var phase: SessionPhase = .idle
@@ -23,7 +24,7 @@ final class MeetingViewModel: ObservableObject {
   private var cleanupOperationID: UUID?
 
   init(
-    recordingService: any RecordingServicing = RecordingService(),
+    recordingService: any RecordingServicing = RecordingServiceCoordinator(),
     analysisService: any MeetingAnalysisGenerating = OpenAIService(),
     exportService: ExportService = ExportService(),
     speechServiceFactory: @escaping @Sendable () -> any SpeechServicing = {
@@ -73,9 +74,13 @@ final class MeetingViewModel: ObservableObject {
     phase = .starting
 
     let operationID = UUID()
+    let captureMode = captureMode
     activeOperationID = operationID
     workflowTask = Task { [weak self] in
-      await self?.beginRecording(operationID: operationID)
+      await self?.beginRecording(
+        operationID: operationID,
+        captureMode: captureMode
+      )
     }
   }
 
@@ -143,7 +148,10 @@ final class MeetingViewModel: ObservableObject {
     return title.isEmpty ? "無題の会議" : title
   }
 
-  private func beginRecording(operationID: UUID) async {
+  private func beginRecording(
+    operationID: UUID,
+    captureMode: MeetingCaptureMode
+  ) async {
     guard activeOperationID == operationID else { return }
     let speechService = speechServiceFactory()
 
@@ -155,7 +163,7 @@ final class MeetingViewModel: ObservableObject {
       let updates = try await speechService.start(locale: .current)
       try ensureCurrent(operationID)
 
-      let session = try await recordingService.startRecording()
+      let session = try await recordingService.startRecording(mode: captureMode)
       try ensureCurrent(operationID)
 
       transcriptTask = Task { @MainActor [weak self] in

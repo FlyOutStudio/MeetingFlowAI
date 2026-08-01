@@ -59,7 +59,36 @@ private struct ControlPanelView: View {
           .font(.headline)
         TextField("例：受注〜発送フロー改善会議", text: $viewModel.meetingTitle)
           .textFieldStyle(.roundedBorder)
-          .disabled(viewModel.phase == .recording)
+          .disabled(!viewModel.canStartRecording)
+      }
+
+      VStack(alignment: .leading, spacing: 8) {
+        Text("録音モード")
+          .font(.headline)
+        Picker("録音モード", selection: $viewModel.captureMode) {
+          ForEach(MeetingCaptureMode.allCases) { mode in
+            Label(mode.displayName, systemImage: mode.systemImage)
+              .tag(mode)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .disabled(!viewModel.canStartRecording)
+
+        Text(viewModel.captureMode.description)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+
+        if viewModel.captureMode == .onlineMeeting {
+          Label(
+            "録音開始後、会議アプリを選択します。初回の画面収録許可後は、アプリの再起動が必要な場合があります。",
+            systemImage: "rectangle.on.rectangle.badge.gearshape"
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        }
       }
 
       HStack(spacing: 8) {
