@@ -35,7 +35,7 @@ final class OpenAIServiceTests: XCTestCase {
         "application/json"
       )
 
-      let body = try XCTUnwrap(request.httpBody)
+      let body = try XCTUnwrap(Self.bodyData(from: request))
       let json = try XCTUnwrap(
         JSONSerialization.jsonObject(with: body) as? [String: Any]
       )
@@ -356,6 +356,34 @@ final class OpenAIServiceTests: XCTestCase {
         file: file,
         line: line
       )
+    }
+  }
+
+  /// URLSession may move `httpBody` into a stream before a custom URLProtocol
+  /// receives the request, so tests support both representations.
+  private static func bodyData(from request: URLRequest) throws -> Data? {
+    if let body = request.httpBody {
+      return body
+    }
+
+    guard let stream = request.httpBodyStream else {
+      return nil
+    }
+
+    stream.open()
+    defer { stream.close() }
+
+    var body = Data()
+    var buffer = [UInt8](repeating: 0, count: 4_096)
+    while true {
+      let count = stream.read(&buffer, maxLength: buffer.count)
+      if count < 0 {
+        throw stream.streamError ?? URLError(.cannotDecodeRawData)
+      }
+      if count == 0 {
+        return body
+      }
+      body.append(contentsOf: buffer.prefix(count))
     }
   }
 
