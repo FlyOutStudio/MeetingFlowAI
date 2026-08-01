@@ -325,7 +325,7 @@ final class ScreenCaptureSourcePicker: NSObject, @unchecked Sendable {
     picker.maximumStreamCount = 1
     picker.add(self)
     picker.isActive = true
-    picker.present(for: nil, using: .application)
+    picker.present(using: .application)
   }
 
   private var hasPendingSelection: Bool {
