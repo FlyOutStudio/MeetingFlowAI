@@ -56,7 +56,7 @@ if [[ ! -x "${executable_path}" ]]; then
     exit 1
 fi
 
-/usr/bin/lipo -verify_arch arm64 x86_64 "${executable_path}"
+/usr/bin/lipo "${executable_path}" -verify_arch arm64 x86_64
 
 # A dash is codesign's Ad Hoc identity. Supplying the project's entitlements
 # here preserves App Sandbox capabilities without a certificate or keychain.
