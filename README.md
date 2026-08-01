@@ -95,7 +95,7 @@ OPENAI_API_KEY=your-development-key
 - 外向きネットワーク接続: OpenAI Responses APIへの送信
 - ユーザー選択ファイルの読み書き: Save Panelで選んだ場所へのExport
 
-`Info.plist`はXcodeが自動生成し、`NSMicrophoneUsageDescription`と`NSSpeechRecognitionUsageDescription`はBuild Settingsから注入します。権限の実体は`Configuration/MeetingFlowAI.entitlements`にあります。
+`Info.plist`はXcodeが自動生成し、`NSMicrophoneUsageDescription`、`NSScreenCaptureUsageDescription`、`NSSpeechRecognitionUsageDescription`はBuild Settingsから注入します。権限の実体は`Configuration/MeetingFlowAI.entitlements`にあります。
 
 オンラインモードのシステム音声は、ScreenCaptureKitとmacOS標準の共有pickerを通じて、利用者がその都度選択したアプリから取得します。このアクセスはmacOSのプライバシー設定で管理され、画面映像は録画ファイルへ保存しません。
 

@@ -337,6 +337,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "会議音声を録音し、リアルタイムで文字起こしするためにマイクを使用します。";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "オンライン会議で選択したアプリの音声を文字起こしするために、画面収録へのアクセスを使用します。画面映像は保存しません。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "会議音声をリアルタイムで文字起こしするために音声認識を使用します。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -368,6 +369,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "会議音声を録音し、リアルタイムで文字起こしするためにマイクを使用します。";
+				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "オンライン会議で選択したアプリの音声を文字起こしするために、画面収録へのアクセスを使用します。画面映像は保存しません。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "会議音声をリアルタイムで文字起こしするために音声認識を使用します。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

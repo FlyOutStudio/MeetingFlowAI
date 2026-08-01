@@ -56,6 +56,29 @@ if [[ ! -x "${executable_path}" ]]; then
     exit 1
 fi
 
+required_usage_descriptions=(
+    NSMicrophoneUsageDescription
+    NSScreenCaptureUsageDescription
+    NSSpeechRecognitionUsageDescription
+)
+
+for key in "${required_usage_descriptions[@]}"; do
+    if ! value="$(
+        /usr/bin/plutil \
+            -extract "${key}" \
+            raw \
+            -o - \
+            "${app_path}/Contents/Info.plist"
+    )"; then
+        echo "Missing usage description: ${key}" >&2
+        exit 1
+    fi
+    if [[ -z "${value//[[:space:]]/}" ]]; then
+        echo "Empty usage description: ${key}" >&2
+        exit 1
+    fi
+done
+
 /usr/bin/lipo "${executable_path}" -verify_arch arm64 x86_64
 
 # A dash is codesign's Ad Hoc identity. Supplying the project's entitlements
