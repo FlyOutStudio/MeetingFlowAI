@@ -122,7 +122,7 @@ private final class KeychainAccessingStub: KeychainAccessing, @unchecked Sendabl
   }
 
   func read(service: String, account: String) throws -> Data? {
-    lock.withLock {
+    try lock.withLock {
       lastService = service
       lastAccount = account
       if let readError {

@@ -110,7 +110,7 @@ final class OpenAIServiceTests: XCTestCase {
 
       return Self.response(
         statusCode: 200,
-        json: Self.completedResponseJSON(
+        json: try Self.completedResponseJSON(
           analysis: [
             "summary": "# 要点\n受注確認を標準化する。",
             "todo": [
@@ -341,7 +341,7 @@ final class OpenAIServiceTests: XCTestCase {
     line: UInt = #line
   ) async {
     do {
-      try await operation()
+      _ = try await operation()
       XCTFail("AppErrorが必要です。", file: file, line: line)
     } catch let error as AppError {
       XCTAssertTrue(
