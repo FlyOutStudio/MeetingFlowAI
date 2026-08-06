@@ -4,6 +4,7 @@ import Foundation
 enum SessionPhase: Equatable, Sendable {
   case idle
   case starting
+  case importing
   case recording
   case stopping
   case transcriptReady
@@ -12,7 +13,7 @@ enum SessionPhase: Equatable, Sendable {
 
   var isBusy: Bool {
     switch self {
-    case .starting, .stopping, .generating:
+    case .starting, .importing, .stopping, .generating:
       true
     default:
       false
@@ -25,6 +26,8 @@ enum SessionPhase: Equatable, Sendable {
       "待機中"
     case .starting:
       "録音を準備中"
+    case .importing:
+      "音声ファイルを文字起こし中"
     case .recording:
       "録音中"
     case .stopping:

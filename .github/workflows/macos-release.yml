@@ -21,6 +21,15 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate tagged app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          app_version="${TAG_NAME#v}"
+          matches="$(grep -c "MARKETING_VERSION = ${app_version};" MeetingFlowAI.xcodeproj/project.pbxproj)"
+          test "$matches" -eq 2
+
       - name: Run unit tests
         run: xcrun swift test --parallel
 

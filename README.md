@@ -16,6 +16,9 @@ MeetingFlowAIは、対面会議やオンライン会議の音声をリアルタ�
 - 部門・担当者、アクション、次工程を保持する構造化業務フロー
 - 構造化フローを正本として生成するMermaid `flowchart TD`
 - Markdown（`.md`）、Mermaid（`.mmd`）、JSONの書き出し
+- SwiftDataによる文字起こし・解析結果のローカル自動保存と会議履歴
+- 過去の会議履歴の再表示、新しい会議への切り替え、履歴削除
+- 既存音声ファイルの読み込みと文字起こし・Claude解析
 - アプリ内設定からAnthropic APIキーをmacOS Keychainへ保存・更新・削除
 - GitHub ReleasesからダウンロードできるUniversal `.app` ZIP
 - 文字起こし確定後の一時録音ファイル自動削除
@@ -60,6 +63,15 @@ Speech FrameworkのAPI可用性に合わせ、実行時に音声認識方式を�
 4. それでもmacOSにブロックされた場合は、警告を閉じ、システム設定 > プライバシーとセキュリティで「このまま開く」を選び、再確認画面の「開く」を選びます。
 5. アプリの「APIキー設定」を開き、自分のAnthropic APIキーを入力して「Keychainへ保存」を選びます。
 6. 録音開始時に、マイクと音声認識へのアクセスを許可します。オンラインモードでは、画面収録とシステムオーディオ録音へのアクセスも許可し、macOS標準のpickerで対象の会議アプリを選択します。
+
+### インストール済みアプリを更新する
+
+1. MeetingFlowAIを終了します。
+2. Releasesから新しい`MeetingFlowAI-macOS.zip`をダウンロードして展開します。
+3. 新しい`MeetingFlowAI.app`をApplicationsフォルダへ移動し、「置き換える」を選びます。
+4. Finderから起動します。macOSにブロックされた場合は、初回インストールと同じ右クリックの「開く」を使用します。
+
+同じBundle Identifierを維持した通常の上書き更新では、SwiftDataの会議履歴とKeychainのAPIキーは残ります。アプリ本体の上書きではなく、AppCleanerなどで関連データまで削除すると履歴を失うため使用しないでください。更新前に重要な会議をMarkdownまたはJSONへExportしておくと安全です。
 
 初回許可後は、Finderから通常どおりダブルクリックして起動できます。APIキーもログインKeychainから読み込むため、TerminalやXcodeは不要です。Appleの現行手順は[Macでアプリを安全に開く](https://support.apple.com/ja-jp/102445)で確認できます。
 
@@ -145,8 +157,8 @@ swift test
 リリースを作成する場合は、次のように`v`で始まるタグをpushします。
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 タグのビルドに成功すると、GitHub Releaseが自動生成され、同じZIPがRelease assetとして添付されます。Release作成にはGitHubがJobごとに発行する`GITHUB_TOKEN`だけを使うため、Personal Access Tokenの登録は不要です。Private repositoryでも動作しますが、Actionsの実行時間とartifact storageは利用中のGitHubプランの割当対象です。
@@ -173,6 +185,8 @@ git push origin v1.1.0
 5. Stopで録音を終了します。
 6. 文字起こしがClaude Messages APIへ送られ、解析が終わると「議事録」「ToDo」「業務フロー」「Mermaid」の各タブが表示されます。
 7. MermaidタブのCopyでソースをコピーするか、Exportでファイルを保存します。
+
+次の会議へ進むときは、左側の「新しい会議」を選びます。過去の会議は「会議履歴」からいつでも開き直せます。すでにある音声を使う場合は「既存の音声を読み込む」から音声ファイルを選択します。読み込み元ファイルは変更・複製せず、文字起こしと解析結果だけを履歴へ保存します。
 
 AI解析中の処理はキャンセルできます。通信、権限、APIキー、構造化レスポンスの問題は画面上にエラーとして表示されます。
 
@@ -211,7 +225,7 @@ MeetingFlowAI/
 └── MeetingFlowAITests/
 ```
 
-MVVMを基本に、録音、音声認識、AI解析、Exportをプロトコル境界で分離しています。SwiftUIから外部APIの詳細を切り離すことで、各サービスの差し替えとユニットテストを容易にします。
+MVVMを基本に、録音、音声認識、AI解析、SwiftData履歴、Exportをプロトコル境界で分離しています。SwiftUIから外部APIや保存方式の詳細を切り離すことで、各サービスの差し替えとユニットテストを容易にします。
 
 引き継ぎ・運用時は、[SETUP.md](SETUP.md)、[OPERATIONS.md](OPERATIONS.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[CHANGELOG.md](CHANGELOG.md)、[TODO.md](TODO.md)も参照してください。
 
@@ -225,4 +239,4 @@ APIキーは利用者がアプリ内で入力し、macOSのログインKeychain�
 
 いずれの場合も、利用者認証、レート制限、失効、ログからの機密情報除外を設計してください。会議内容は機密情報を含む可能性があるため、組織のデータ取扱方針とAnthropic側の設定を確認してから利用してください。
 
-本アプリはClaude Messages APIをステートレスに呼び出し、会議タイトルと文字起こし以外のファイルは送信しません。JSON SchemaによるStructured Outputsを使用しており、Anthropic側ではスキーマが処理最適化のため一時的にキャッシュされる場合があります。機密性の高い会議へ利用する前に、Anthropic組織の契約・データ保持設定と[API and data retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention)を確認してください。
+本アプリはClaude Messages APIをステートレスに呼び出し、会議タイトルと文字起こし以外のファイルは送信しません。文字起こしと解析結果はSwiftDataで利用者のMac内へ保存し、録音音声と読み込み元音声は保存しません。JSON SchemaによるStructured Outputsを使用しており、Anthropic側ではスキーマが処理最適化のため一時的にキャッシュされる場合があります。機密性の高い会議へ利用する前に、Anthropic組織の契約・データ保持設定と[API and data retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention)を確認してください。

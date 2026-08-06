@@ -10,11 +10,15 @@ final class MeetingViewModel: ObservableObject {
   @Published private(set) var phase: SessionPhase = .idle
   @Published private(set) var presentedError: AppError?
   @Published private(set) var isExporting = false
+  @Published private(set) var meetings: [MeetingRecord] = []
+  @Published private(set) var selectedMeetingID: UUID?
 
   private let recordingService: any RecordingServicing
   private let analysisService: any MeetingAnalysisGenerating
   private let exportService: ExportService
   private let speechServiceFactory: @Sendable () -> any SpeechServicing
+  private let meetingHistoryStore: (any MeetingHistoryStoring)?
+  private let audioFileSampleReader: AudioFileSampleReader
 
   private var speechService: (any SpeechServicing)?
   private var sampleTask: Task<Void, Never>?
@@ -22,11 +26,17 @@ final class MeetingViewModel: ObservableObject {
   private var workflowTask: Task<Void, Never>?
   private var activeOperationID: UUID?
   private var cleanupOperationID: UUID?
+  private var currentMeetingID: UUID?
+  private var currentMeetingCreatedAt: Date?
+  private var currentSource: MeetingSource = .recording
+  private var currentCaptureMode: MeetingCaptureMode?
 
   init(
     recordingService: any RecordingServicing = RecordingServiceCoordinator(),
     analysisService: any MeetingAnalysisGenerating = ClaudeService(),
     exportService: ExportService = ExportService(),
+    meetingHistoryStore: (any MeetingHistoryStoring)? = nil,
+    audioFileSampleReader: AudioFileSampleReader = AudioFileSampleReader(),
     speechServiceFactory: @escaping @Sendable () -> any SpeechServicing = {
       SpeechServiceFactory.make()
     }
@@ -34,7 +44,11 @@ final class MeetingViewModel: ObservableObject {
     self.recordingService = recordingService
     self.analysisService = analysisService
     self.exportService = exportService
+    self.meetingHistoryStore = meetingHistoryStore
+    self.audioFileSampleReader = audioFileSampleReader
     self.speechServiceFactory = speechServiceFactory
+
+    reloadMeetings(selectMostRecent: true)
   }
 
   var canStartRecording: Bool {
@@ -48,6 +62,15 @@ final class MeetingViewModel: ObservableObject {
 
   var canStopRecording: Bool {
     phase == .recording
+  }
+
+  var canSwitchMeeting: Bool {
+    switch phase {
+    case .idle, .transcriptReady, .completed:
+      true
+    default:
+      false
+    }
   }
 
   var canRetryAnalysis: Bool {
@@ -69,8 +92,9 @@ final class MeetingViewModel: ObservableObject {
 
     workflowTask?.cancel()
     presentedError = nil
-    transcript = ""
-    analysis = nil
+    prepareNewMeeting(defaultTitle: meetingTitle)
+    currentSource = .recording
+    currentCaptureMode = captureMode
     phase = .starting
 
     let operationID = UUID()
@@ -81,6 +105,78 @@ final class MeetingViewModel: ObservableObject {
         operationID: operationID,
         captureMode: captureMode
       )
+    }
+  }
+
+  func importAudio(from url: URL) {
+    guard canSwitchMeeting else { return }
+
+    workflowTask?.cancel()
+    presentedError = nil
+    prepareNewMeeting(
+      defaultTitle: url.deletingPathExtension().lastPathComponent
+    )
+    currentSource = .importedAudio
+    currentCaptureMode = nil
+    phase = .importing
+
+    let operationID = UUID()
+    activeOperationID = operationID
+    workflowTask = Task { [weak self] in
+      await self?.transcribeImportedAudio(at: url, operationID: operationID)
+    }
+  }
+
+  func handleAudioImportSelectionError(_ error: Error) {
+    let nsError = error as NSError
+    guard nsError.code != NSUserCancelledError else { return }
+    present(AppError.speech("音声ファイルを選択できませんでした。"))
+  }
+
+  func newMeeting() {
+    guard canSwitchMeeting else { return }
+    presentedError = nil
+    prepareNewMeeting(defaultTitle: "")
+    phase = .idle
+  }
+
+  func selectMeeting(id: UUID) {
+    guard canSwitchMeeting, let record = meetings.first(where: { $0.id == id }) else {
+      return
+    }
+
+    currentMeetingID = record.id
+    currentMeetingCreatedAt = record.createdAt
+    currentSource = record.source
+    currentCaptureMode = record.captureMode
+    selectedMeetingID = record.id
+    meetingTitle = record.title
+    transcript = record.transcript
+    analysis = record.analysis
+    if let captureMode = record.captureMode {
+      self.captureMode = captureMode
+    }
+    phase = record.analysis == nil ? .transcriptReady : .completed
+  }
+
+  func deleteMeeting(id: UUID) {
+    guard canSwitchMeeting, let meetingHistoryStore else { return }
+
+    do {
+      let wasSelected = selectedMeetingID == id
+      try meetingHistoryStore.delete(id: id)
+      reloadMeetings(selectMostRecent: false)
+
+      if wasSelected {
+        if let nextMeeting = meetings.first {
+          selectMeeting(id: nextMeeting.id)
+        } else {
+          prepareNewMeeting(defaultTitle: "")
+          phase = .idle
+        }
+      }
+    } catch {
+      present(AppError.storage(error.localizedDescription))
     }
   }
 
@@ -248,6 +344,8 @@ final class MeetingViewModel: ObservableObject {
         throw AppError.speech("認識できる発話がありませんでした。")
       }
 
+      persistCurrentMeeting()
+
       phase = .generating
       await generateAnalysis(operationID: operationID)
     } catch {
@@ -267,6 +365,7 @@ final class MeetingViewModel: ObservableObject {
       analysis = generated
       activeOperationID = nil
       phase = .completed
+      persistCurrentMeeting()
     } catch {
       guard activeOperationID == operationID else { return }
       activeOperationID = nil
@@ -274,6 +373,127 @@ final class MeetingViewModel: ObservableObject {
       if !isCancellation(error) {
         present(error)
       }
+    }
+  }
+
+  private func transcribeImportedAudio(
+    at url: URL,
+    operationID: UUID
+  ) async {
+    guard activeOperationID == operationID else { return }
+
+    let hasSecurityScope = url.startAccessingSecurityScopedResource()
+    defer {
+      if hasSecurityScope {
+        url.stopAccessingSecurityScopedResource()
+      }
+    }
+
+    let speechService = speechServiceFactory()
+    self.speechService = speechService
+
+    do {
+      let updates = try await speechService.start(locale: .current)
+      try ensureCurrent(operationID)
+
+      transcriptTask = Task { @MainActor [weak self] in
+        do {
+          for try await update in updates {
+            try Task.checkCancellation()
+            guard self?.activeOperationID == operationID else {
+              throw CancellationError()
+            }
+            self?.transcript = update.displayText
+          }
+        } catch {
+          self?.handleLiveWorkerFailure(error, operationID: operationID)
+        }
+      }
+
+      for try await sample in audioFileSampleReader.samples(from: url) {
+        try ensureCurrent(operationID)
+        try await speechService.append(sample)
+      }
+
+      try await speechService.finish()
+      await transcriptTask?.value
+      try ensureCurrent(operationID)
+
+      transcriptTask = nil
+      self.speechService = nil
+      phase = .transcriptReady
+
+      guard
+        !transcript
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+          .isEmpty
+      else {
+        throw AppError.speech("認識できる発話がありませんでした。")
+      }
+
+      persistCurrentMeeting()
+      phase = .generating
+      await generateAnalysis(operationID: operationID)
+    } catch {
+      await speechService.cancel()
+      guard activeOperationID == operationID else { return }
+      if !isCancellation(error) { present(error) }
+      scheduleCleanup(operationID: operationID)
+    }
+  }
+
+  private func prepareNewMeeting(defaultTitle: String) {
+    currentMeetingID = nil
+    currentMeetingCreatedAt = nil
+    selectedMeetingID = nil
+    currentSource = .recording
+    currentCaptureMode = nil
+    meetingTitle = defaultTitle
+    transcript = ""
+    analysis = nil
+  }
+
+  private func persistCurrentMeeting() {
+    guard let meetingHistoryStore else { return }
+
+    let now = Date()
+    let id = currentMeetingID ?? UUID()
+    let createdAt = currentMeetingCreatedAt ?? now
+    let title = normalizedTitle
+
+    do {
+      try meetingHistoryStore.upsert(
+        MeetingRecord(
+          id: id,
+          title: title,
+          transcript: transcript,
+          analysis: analysis,
+          captureMode: currentCaptureMode,
+          source: currentSource,
+          createdAt: createdAt,
+          updatedAt: now
+        )
+      )
+      currentMeetingID = id
+      currentMeetingCreatedAt = createdAt
+      selectedMeetingID = id
+      meetingTitle = title
+      reloadMeetings(selectMostRecent: false)
+    } catch {
+      present(AppError.storage(error.localizedDescription))
+    }
+  }
+
+  private func reloadMeetings(selectMostRecent: Bool) {
+    guard let meetingHistoryStore else { return }
+
+    do {
+      meetings = try meetingHistoryStore.fetchAll()
+      if selectMostRecent, let mostRecent = meetings.first {
+        selectMeeting(id: mostRecent.id)
+      }
+    } catch {
+      present(AppError.storage(error.localizedDescription))
     }
   }
 

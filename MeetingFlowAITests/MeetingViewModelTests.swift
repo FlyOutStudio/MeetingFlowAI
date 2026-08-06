@@ -218,14 +218,61 @@ final class MeetingViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testCompletedMeetingIsSavedAndCanBeSelectedAgain() async throws {
+    let recording = RecordingServiceStub()
+    let speech = SpeechServiceStub()
+    let expected = Self.analysis(summary: "保存される解析")
+    let analysisService = SequencedAnalysisService([.success(expected)])
+    let speechFactory = SpeechServiceFactoryStub([speech])
+    let historyStore = MeetingHistoryStoreStub()
+    let viewModel = makeViewModel(
+      recording: recording,
+      analysis: analysisService,
+      speechFactory: speechFactory,
+      historyStore: historyStore
+    )
+    viewModel.meetingTitle = "履歴テスト"
+
+    viewModel.startRecording()
+    try await waitUntil("録音状態へ遷移しませんでした。") {
+      viewModel.phase == .recording
+    }
+    await speech.emit(finalizedText: "保存対象の会議内容")
+    try await waitUntil("文字起こしが反映されませんでした。") {
+      viewModel.transcript == "保存対象の会議内容"
+    }
+
+    viewModel.stopRecording()
+    try await waitUntil("会議履歴が保存されませんでした。") {
+      viewModel.phase == .completed && viewModel.meetings.count == 1
+    }
+
+    let savedID = try XCTUnwrap(viewModel.selectedMeetingID)
+    XCTAssertEqual(viewModel.meetings[0].title, "履歴テスト")
+    XCTAssertEqual(viewModel.meetings[0].transcript, "保存対象の会議内容")
+    XCTAssertEqual(viewModel.meetings[0].analysis, expected)
+
+    viewModel.newMeeting()
+    XCTAssertEqual(viewModel.phase, .idle)
+    XCTAssertTrue(viewModel.transcript.isEmpty)
+
+    viewModel.selectMeeting(id: savedID)
+    XCTAssertEqual(viewModel.phase, .completed)
+    XCTAssertEqual(viewModel.analysis, expected)
+    XCTAssertEqual(viewModel.transcript, "保存対象の会議内容")
+  }
+
+  @MainActor
   private func makeViewModel(
     recording: any RecordingServicing,
     analysis: any MeetingAnalysisGenerating,
-    speechFactory: SpeechServiceFactoryStub
+    speechFactory: SpeechServiceFactoryStub,
+    historyStore: (any MeetingHistoryStoring)? = nil
   ) -> MeetingViewModel {
     MeetingViewModel(
       recordingService: recording,
       analysisService: analysis,
+      meetingHistoryStore: historyStore,
       speechServiceFactory: { speechFactory.make() }
     )
   }
@@ -298,6 +345,24 @@ final class MeetingViewModelTests: XCTestCase {
       }
       try await Task.sleep(nanoseconds: 10_000_000)
     }
+  }
+}
+
+@MainActor
+private final class MeetingHistoryStoreStub: MeetingHistoryStoring {
+  private var records: [MeetingRecord] = []
+
+  func fetchAll() throws -> [MeetingRecord] {
+    records.sorted { $0.updatedAt > $1.updatedAt }
+  }
+
+  func upsert(_ record: MeetingRecord) throws {
+    records.removeAll { $0.id == record.id }
+    records.append(record)
+  }
+
+  func delete(id: UUID) throws {
+    records.removeAll { $0.id == id }
   }
 }
 

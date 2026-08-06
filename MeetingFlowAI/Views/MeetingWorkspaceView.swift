@@ -1,10 +1,14 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MeetingWorkspaceView: View {
   @ObservedObject var viewModel: MeetingViewModel
 
   var body: some View {
     HSplitView {
+      MeetingHistorySidebar(viewModel: viewModel)
+        .frame(minWidth: 220, idealWidth: 250, maxWidth: 300)
+
       ControlPanelView(viewModel: viewModel)
         .frame(minWidth: 260, idealWidth: 300, maxWidth: 340)
 
@@ -20,7 +24,7 @@ struct MeetingWorkspaceView: View {
       }
       .frame(minWidth: 620)
     }
-    .frame(minWidth: 960, minHeight: 680)
+    .frame(minWidth: 1_120, minHeight: 680)
     .alert(
       "エラー",
       isPresented: Binding(
@@ -42,8 +46,104 @@ struct MeetingWorkspaceView: View {
   }
 }
 
+private struct MeetingHistorySidebar: View {
+  @ObservedObject var viewModel: MeetingViewModel
+  @State private var meetingPendingDeletion: MeetingRecord?
+
+  var body: some View {
+    VStack(spacing: 12) {
+      HStack {
+        Label("会議履歴", systemImage: "clock.arrow.circlepath")
+          .font(.headline)
+        Spacer()
+      }
+
+      Button {
+        viewModel.newMeeting()
+      } label: {
+        Label("新しい会議", systemImage: "plus")
+          .frame(maxWidth: .infinity)
+      }
+      .buttonStyle(.borderedProminent)
+      .disabled(!viewModel.canSwitchMeeting)
+
+      if viewModel.meetings.isEmpty {
+        ContentUnavailableView(
+          "履歴はまだありません",
+          systemImage: "text.document",
+          description: Text("録音または音声ファイルの解析後に自動保存されます。")
+        )
+      } else {
+        List(selection: selectedMeetingBinding) {
+          ForEach(viewModel.meetings) { meeting in
+            VStack(alignment: .leading, spacing: 5) {
+              Text(meeting.title)
+                .font(.callout.weight(.semibold))
+                .lineLimit(2)
+              Text(meeting.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              Label(meeting.source.displayName, systemImage: sourceImage(meeting.source))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+            .tag(meeting.id)
+            .contextMenu {
+              Button("削除", role: .destructive) {
+                meetingPendingDeletion = meeting
+              }
+            }
+          }
+        }
+        .listStyle(.sidebar)
+      }
+    }
+    .padding(14)
+    .background(Color(nsColor: .windowBackgroundColor))
+    .alert(
+      "会議履歴を削除しますか？",
+      isPresented: Binding(
+        get: { meetingPendingDeletion != nil },
+        set: { if !$0 { meetingPendingDeletion = nil } }
+      ),
+      presenting: meetingPendingDeletion
+    ) { meeting in
+      Button("削除", role: .destructive) {
+        viewModel.deleteMeeting(id: meeting.id)
+        meetingPendingDeletion = nil
+      }
+      Button("キャンセル", role: .cancel) {
+        meetingPendingDeletion = nil
+      }
+    } message: { meeting in
+      Text("「\(meeting.title)」の文字起こしと解析結果を削除します。この操作は取り消せません。")
+    }
+  }
+
+  private var selectedMeetingBinding: Binding<UUID?> {
+    Binding(
+      get: { viewModel.selectedMeetingID },
+      set: { id in
+        guard let id else { return }
+        viewModel.selectMeeting(id: id)
+      }
+    )
+  }
+
+  private func sourceImage(_ source: MeetingSource) -> String {
+    switch source {
+    case .recording:
+      "record.circle"
+    case .importedAudio:
+      "waveform.badge.plus"
+    }
+  }
+}
+
 private struct ControlPanelView: View {
   @ObservedObject var viewModel: MeetingViewModel
+  @State private var isAudioImporterPresented = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -123,6 +223,15 @@ private struct ControlPanelView: View {
         .buttonStyle(.bordered)
         .controlSize(.large)
         .disabled(!viewModel.canStopRecording)
+
+        Button {
+          isAudioImporterPresented = true
+        } label: {
+          Label("既存の音声を読み込む", systemImage: "waveform.badge.plus")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!viewModel.canSwitchMeeting)
       }
 
       if viewModel.phase.isBusy {
@@ -166,20 +275,34 @@ private struct ControlPanelView: View {
       }
       .buttonStyle(.link)
 
-      Text("録音停止後は会議タイトルと文字起こしテキストだけをClaudeへ送信します。一時録音は処理後に自動削除されます。")
+      Text("文字起こしと解析結果はこのMacへ自動保存されます。Claudeへ送るのは会議タイトルと文字起こしだけです。録音・読み込み元の音声は保存しません。")
         .font(.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
     }
     .padding(22)
     .background(Color(nsColor: .controlBackgroundColor))
+    .fileImporter(
+      isPresented: $isAudioImporterPresented,
+      allowedContentTypes: [.audio],
+      allowsMultipleSelection: false
+    ) { result in
+      switch result {
+      case .success(let urls):
+        if let url = urls.first {
+          viewModel.importAudio(from: url)
+        }
+      case .failure(let error):
+        viewModel.handleAudioImportSelectionError(error)
+      }
+    }
   }
 
   private var statusColor: Color {
     switch viewModel.phase {
     case .recording:
       .red
-    case .starting, .stopping, .generating:
+    case .starting, .importing, .stopping, .generating:
       .orange
     case .completed:
       .green

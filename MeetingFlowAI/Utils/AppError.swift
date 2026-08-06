@@ -15,6 +15,7 @@ enum AppError: LocalizedError, Equatable, Sendable {
   case aiAnalysis(String)
   case invalidResponse(String)
   case keychain(String)
+  case storage(String)
   case export(String)
   case cancelled
 
@@ -40,6 +41,8 @@ enum AppError: LocalizedError, Equatable, Sendable {
       "AIから不正な応答を受信しました。\(detail(message))"
     case .keychain(let message):
       "APIキーをKeychainで処理できませんでした。\(detail(message))"
+    case .storage(let message):
+      "会議履歴を保存できませんでした。\(detail(message))"
     case .export(let message):
       "ファイルの保存に失敗しました。\(detail(message))"
     case .cancelled:
@@ -61,6 +64,8 @@ enum AppError: LocalizedError, Equatable, Sendable {
       "ネットワーク接続を確認し、しばらく待ってから再試行してください。"
     case .keychain:
       "Macのログインキーチェーンがロックされていないか確認し、もう一度お試しください。"
+    case .storage:
+      "空き容量を確認して、もう一度お試しください。"
     case .recording, .speech, .aiAnalysis, .invalidResponse, .export:
       "内容を確認して、もう一度お試しください。"
     case .cancelled:

@@ -17,6 +17,8 @@
 
 APIキーはソースや共有Schemeへ保存しないでください。開発時だけ環境変数を使う場合は、`.env.example`を値の一覧として参照し、個人用SchemeのRun > Argumentsへ`ANTHROPIC_API_KEY`を設定します。本アプリは`.env`を自動読込しません。
 
+会議履歴にはmacOS標準のSwiftDataを使用するため、MySQLなどのサーバー構築や接続設定は不要です。初回起動時にアプリのSandbox内へローカル保存領域が作成されます。
+
 ## ビルドとテスト
 
 ```bash
