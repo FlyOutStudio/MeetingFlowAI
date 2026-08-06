@@ -25,7 +25,7 @@ final class MeetingViewModel: ObservableObject {
 
   init(
     recordingService: any RecordingServicing = RecordingServiceCoordinator(),
-    analysisService: any MeetingAnalysisGenerating = OpenAIService(),
+    analysisService: any MeetingAnalysisGenerating = ClaudeService(),
     exportService: ExportService = ExportService(),
     speechServiceFactory: @escaping @Sendable () -> any SpeechServicing = {
       SpeechServiceFactory.make()

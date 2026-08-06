@@ -6,7 +6,7 @@ final class AppErrorTests: XCTestCase {
   func testErrorsProvideJapaneseDescriptions() {
     XCTAssertEqual(
       AppError.missingAPIKey.errorDescription,
-      "OpenAI APIキーが設定されていません。"
+      "Anthropic APIキーが設定されていません。"
     )
     XCTAssertEqual(
       AppError.export("ディスク容量不足").errorDescription,

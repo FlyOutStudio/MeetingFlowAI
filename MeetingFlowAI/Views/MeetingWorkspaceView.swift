@@ -166,7 +166,7 @@ private struct ControlPanelView: View {
       }
       .buttonStyle(.link)
 
-      Text("録音停止後は会議タイトルと文字起こしテキストだけをOpenAIへ送信します。一時録音は処理後に自動削除されます。")
+      Text("録音停止後は会議タイトルと文字起こしテキストだけをClaudeへ送信します。一時録音は処理後に自動削除されます。")
         .font(.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)

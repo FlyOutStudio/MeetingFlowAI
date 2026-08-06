@@ -10,13 +10,13 @@ MeetingFlowAIは、対面会議やオンライン会議の音声をリアルタ�
 - 対面（マイク）／オンライン（選択アプリのシステム音声＋自分のマイク）の録音モード
 - Start / Stopだけのシンプルな会議録音
 - 録音中のリアルタイム文字起こしとスクロール表示
-- OpenAI Responses API（`gpt-5.5`）とJSON Schemaによる構造化出力
+- Claude Messages API（`claude-sonnet-5`）とJSON Schemaによる構造化出力
 - Markdown形式の議事録
 - タイトル、担当、期限、優先度を持つToDo表
 - 部門・担当者、アクション、次工程を保持する構造化業務フロー
 - 構造化フローを正本として生成するMermaid `flowchart TD`
 - Markdown（`.md`）、Mermaid（`.mmd`）、JSONの書き出し
-- アプリ内設定からOpenAI APIキーをmacOS Keychainへ保存・更新・削除
+- アプリ内設定からAnthropic APIキーをmacOS Keychainへ保存・更新・削除
 - GitHub ReleasesからダウンロードできるUniversal `.app` ZIP
 - 文字起こし確定後の一時録音ファイル自動削除
 - 処理のキャンセル、エラー表示、ダークモード
@@ -58,7 +58,7 @@ Speech FrameworkのAPI可用性に合わせ、実行時に音声認識方式を�
 2. ZIPを展開し、`MeetingFlowAI.app`をApplicationsフォルダへ移動します。
 3. 初回だけFinderで`MeetingFlowAI.app`を右クリック（またはControlキーを押しながらクリック）し、「開く」を選びます。
 4. それでもmacOSにブロックされた場合は、警告を閉じ、システム設定 > プライバシーとセキュリティで「このまま開く」を選び、再確認画面の「開く」を選びます。
-5. アプリの「APIキー設定」を開き、自分のOpenAI APIキーを入力して「Keychainへ保存」を選びます。
+5. アプリの「APIキー設定」を開き、自分のAnthropic APIキーを入力して「Keychainへ保存」を選びます。
 6. 録音開始時に、マイクと音声認識へのアクセスを許可します。オンラインモードでは、画面収録とシステムオーディオ録音へのアクセスも許可し、macOS標準のpickerで対象の会議アプリを選択します。
 
 初回許可後は、Finderから通常どおりダブルクリックして起動できます。APIキーもログインKeychainから読み込むため、TerminalやXcodeは不要です。Appleの現行手順は[Macでアプリを安全に開く](https://support.apple.com/ja-jp/102445)で確認できます。
@@ -78,7 +78,7 @@ Speech FrameworkのAPI可用性に合わせ、実行時に音声認識方式を�
 開発時だけは、個人用SchemeのEnvironment Variablesへ次の値を追加する方法も利用できます。Keychain保存値がある場合はそちらを優先します。共有Schemeへ秘密値を登録しないでください。
 
 ```text
-OPENAI_API_KEY=your-development-key
+ANTHROPIC_API_KEY=your-development-key
 ```
 
 録音開始時、macOSからマイクと音声認識の使用確認が表示されたら許可してください。オンラインモードでは、Start後にmacOS標準のScreenCaptureKit pickerが表示されるため、Zoomやブラウザなど音声を取り込む会議アプリを選択します。初回は画面収録とシステムオーディオ録音の許可も必要です。拒否した場合は、システム設定 > プライバシーとセキュリティ > マイク／音声認識／画面収録とシステムオーディオ録音から設定を変更できます。初回許可後に取り込みを開始できない場合は、アプリを終了して開き直してください。
@@ -92,7 +92,7 @@ OPENAI_API_KEY=your-development-key
 アプリはApp SandboxとHardened Runtimeを有効にし、次のSandbox権限だけを宣言します。
 
 - マイク入力: 会議録音とリアルタイム文字起こし
-- 外向きネットワーク接続: OpenAI Responses APIへの送信
+- 外向きネットワーク接続: Claude Messages APIへの送信
 - ユーザー選択ファイルの読み書き: Save Panelで選んだ場所へのExport
 
 `Info.plist`はXcodeが自動生成し、`Configuration/MeetingFlowAI-Info.plist`に定義した`NSMicrophoneUsageDescription`、`NSScreenCaptureUsageDescription`、`NSSpeechRecognitionUsageDescription`をマージします。Sandbox権限の実体は`Configuration/MeetingFlowAI.entitlements`にあります。
@@ -162,16 +162,16 @@ git push origin v1.1.0
 3. それでもmacOSにブロックされた場合はダイアログを閉じ、システム設定 > プライバシーとセキュリティを開いて、下へスクロールし「このまま開く」（Open Anyway）を選びます。
 4. 再表示された確認画面で「開く」を選びます。
 
-この操作は、入手元と内容を信頼できる場合だけ行ってください。配布物に`OPENAI_API_KEY`は含まれません。初回起動後にアプリの設定画面から入力し、macOSのログインKeychainへ保存します。保存済みの秘密値を画面へ再表示したり、ソースコードや設定ファイルへ書き込んだりしません。
+この操作は、入手元と内容を信頼できる場合だけ行ってください。配布物に`ANTHROPIC_API_KEY`は含まれません。初回起動後にアプリの設定画面から入力し、macOSのログインKeychainへ保存します。保存済みの秘密値を画面へ再表示したり、ソースコードや設定ファイルへ書き込んだりしません。
 
 ## 使い方
 
-1. 初回だけ「APIキー設定」でOpenAI APIキーをKeychainへ保存します。
+1. 初回だけ「APIキー設定」でAnthropic APIキーをKeychainへ保存します。
 2. 会議タイトルを入力します。
 3. 録音モードから「対面」または「オンライン」を選択します。
 4. Startで録音とリアルタイム文字起こしを開始します。オンラインモードでは、表示されたmacOS標準のpickerで会議アプリを選択します。
 5. Stopで録音を終了します。
-6. 文字起こしがOpenAI Responses APIへ送られ、解析が終わると「議事録」「ToDo」「業務フロー」「Mermaid」の各タブが表示されます。
+6. 文字起こしがClaude Messages APIへ送られ、解析が終わると「議事録」「ToDo」「業務フロー」「Mermaid」の各タブが表示されます。
 7. MermaidタブのCopyでソースをコピーするか、Exportでファイルを保存します。
 
 AI解析中の処理はキャンセルできます。通信、権限、APIキー、構造化レスポンスの問題は画面上にエラーとして表示されます。
@@ -206,12 +206,14 @@ MeetingFlowAI/
 │   ├── ViewModels/   # 画面状態と処理の調停
 │   ├── Services/     # 録音、Exportなどのサービス
 │   ├── Speech/       # OSバージョン別の音声認識
-│   ├── AI/           # Responses API、JSON Schema
+│   ├── AI/           # Claude Messages API、JSON Schema
 │   └── Utils/        # Mermaid生成などの共通処理
 └── MeetingFlowAITests/
 ```
 
 MVVMを基本に、録音、音声認識、AI解析、Exportをプロトコル境界で分離しています。SwiftUIから外部APIの詳細を切り離すことで、各サービスの差し替えとユニットテストを容易にします。
+
+引き継ぎ・運用時は、[SETUP.md](SETUP.md)、[OPERATIONS.md](OPERATIONS.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[CHANGELOG.md](CHANGELOG.md)、[TODO.md](TODO.md)も参照してください。
 
 ## APIキーを扱う際の重要事項
 
@@ -219,8 +221,8 @@ APIキーは利用者がアプリ内で入力し、macOSのログインKeychain�
 
 複数利用者へ本格的に配布する場合は、利用者個人のAPIキーではなく、次の構成を検討してください。
 
-- 自社バックエンド／プロキシでOpenAI APIを呼び、アプリには短命な認証トークンだけを渡す
+- 自社バックエンド／プロキシでClaude APIを呼び、アプリには短命な認証トークンだけを渡す
 
-いずれの場合も、利用者認証、レート制限、失効、ログからの機密情報除外を設計してください。会議内容は機密情報を含む可能性があるため、組織のデータ取扱方針とOpenAI側の設定を確認してから利用してください。
+いずれの場合も、利用者認証、レート制限、失効、ログからの機密情報除外を設計してください。会議内容は機密情報を含む可能性があるため、組織のデータ取扱方針とAnthropic側の設定を確認してから利用してください。
 
-本アプリはResponses APIリクエストに`store: false`を指定しています。これはResponses APIのApplication Stateを保存しないための指定ですが、Zero Data Retention（ZDR）を保証するものではなく、不正利用監視ログなどの保持とは別の設定です。機密性の高い会議へ利用する前に、OpenAI組織／プロジェクトのData Controlsと、[エンドポイント別のデータ保持方針](https://platform.openai.com/docs/models/default-usage-policies-by-endpoint)を確認してください。
+本アプリはClaude Messages APIをステートレスに呼び出し、会議タイトルと文字起こし以外のファイルは送信しません。JSON SchemaによるStructured Outputsを使用しており、Anthropic側ではスキーマが処理最適化のため一時的にキャッシュされる場合があります。機密性の高い会議へ利用する前に、Anthropic組織の契約・データ保持設定と[API and data retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention)を確認してください。

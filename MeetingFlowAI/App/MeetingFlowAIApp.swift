@@ -9,14 +9,14 @@ struct MeetingFlowAIApp: App {
 
   init() {
     let apiKeyStore = KeychainAPIKeyStore()
-    let analysisService = OpenAIService(apiKeyProvider: {
+    let analysisService = ClaudeService(apiKeyProvider: {
       if let storedKey = try await apiKeyStore.loadAPIKey() {
         return storedKey
       }
 
       // Xcodeからの開発実行では、従来どおり個人用Schemeの環境変数も
       // 利用できます。Finder起動の配布版はKeychainを使用します。
-      return ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
+      return ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]
     })
 
     _viewModel = StateObject(

@@ -4,17 +4,20 @@ protocol MeetingAnalysisGenerating: Sendable {
   func analyze(title: String, transcript: String) async throws -> MeetingAnalysis
 }
 
-/// 会議の文字起こしをOpenAI Responses APIで構造化します。
+/// 会議の文字起こしをClaude Messages APIで構造化します。
 ///
 /// APIキーは非同期providerから取得します。本番ではKeychainを優先し、
 /// Xcode開発時だけ環境変数へフォールバックします。テスト時はproviderと
 /// `URLSession`を注入でき、本番の資格情報を使いません。
-actor OpenAIService: MeetingAnalysisGenerating {
+actor ClaudeService: MeetingAnalysisGenerating {
   typealias APIKeyProvider = @Sendable () async throws -> String?
 
+  static let model = "claude-sonnet-5"
+
   private static let defaultEndpoint = URL(
-    string: "https://api.openai.com/v1/responses"
+    string: "https://api.anthropic.com/v1/messages"
   )!
+  private static let apiVersion = "2023-06-01"
 
   private let session: URLSession
   private let endpoint: URL
@@ -22,9 +25,9 @@ actor OpenAIService: MeetingAnalysisGenerating {
 
   init(
     session: URLSession = .shared,
-    endpoint: URL = OpenAIService.defaultEndpoint,
+    endpoint: URL = ClaudeService.defaultEndpoint,
     apiKeyProvider: @escaping APIKeyProvider = {
-      ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
+      ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]
     }
   ) {
     self.session = session
@@ -75,8 +78,8 @@ actor OpenAIService: MeetingAnalysisGenerating {
     } catch let error as URLError where error.code == .cancelled {
       throw AppError.cancelled
     } catch {
-      throw AppError.openAI(
-        "OpenAIに接続できませんでした。ネットワーク接続を確認してください。"
+      throw AppError.aiAnalysis(
+        "Claudeに接続できませんでした。ネットワーク接続を確認してください。"
       )
     }
 
@@ -84,7 +87,7 @@ actor OpenAIService: MeetingAnalysisGenerating {
 
     guard let httpResponse = response as? HTTPURLResponse else {
       throw AppError.invalidResponse(
-        "OpenAIから不正なネットワーク応答を受信しました。"
+        "Claudeから不正なネットワーク応答を受信しました。"
       )
     }
 
@@ -93,16 +96,16 @@ actor OpenAIService: MeetingAnalysisGenerating {
       throw httpError(statusCode: httpResponse.statusCode)
     }
 
-    let apiResponse: ResponsesAPIResponse
+    let apiResponse: ClaudeAPIResponse
     do {
-      apiResponse = try JSONDecoder().decode(ResponsesAPIResponse.self, from: data)
+      apiResponse = try JSONDecoder().decode(ClaudeAPIResponse.self, from: data)
     } catch {
       throw AppError.invalidResponse(
-        "OpenAIの応答形式を読み取れませんでした。"
+        "Claudeの応答形式を読み取れませんでした。"
       )
     }
 
-    let analysis = try parseCompletedResponse(apiResponse)
+    let analysis = try parseResponse(apiResponse)
     try checkCancellation()
     return analysis
   }
@@ -118,73 +121,63 @@ actor OpenAIService: MeetingAnalysisGenerating {
     transcript: String,
     apiKey: String
   ) throws -> URLRequest {
-    let payload = ResponsesAPIRequest(
-      model: "gpt-5.5",
-      instructions: Self.analysisInstructions,
-      input: Self.analysisInput(title: title, transcript: transcript),
-      text: ResponsesTextConfiguration(
-        format: ResponsesJSONSchemaFormat(
-          name: "meeting_analysis",
+    let payload = ClaudeAPIRequest(
+      model: Self.model,
+      maxTokens: 16_384,
+      system: Self.analysisInstructions,
+      messages: [
+        ClaudeInputMessage(
+          role: "user",
+          content: Self.analysisInput(title: title, transcript: transcript)
+        )
+      ],
+      outputConfig: ClaudeOutputConfiguration(
+        format: ClaudeJSONSchemaFormat(
           schema: MeetingAnalysisJSONSchema()
         )
-      ),
-      // Responses APIのApplication State保存を無効にします。
-      // これはZero Data Retentionの設定とは別です。
-      store: false
+      )
     )
 
     var request = URLRequest(url: endpoint)
     request.httpMethod = "POST"
-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+    request.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
     do {
       request.httpBody = try JSONEncoder().encode(payload)
     } catch {
-      throw AppError.openAI(
-        "OpenAIへのリクエストを作成できませんでした。"
+      throw AppError.aiAnalysis(
+        "Claudeへのリクエストを作成できませんでした。"
       )
     }
 
     return request
   }
 
-  private func parseCompletedResponse(
-    _ response: ResponsesAPIResponse
+  private func parseResponse(
+    _ response: ClaudeAPIResponse
   ) throws -> MeetingAnalysis {
-    if response.status == "incomplete" {
-      let reason = Self.incompleteReason(response.incompleteDetails?.reason)
-      throw AppError.invalidResponse(
-        "AIの解析が完了しませんでした（\(reason)）。もう一度お試しください。"
-      )
-    }
-
-    if response.status == "failed" {
-      throw AppError.openAI(
-        "AIの解析に失敗しました。時間をおいてもう一度お試しください。"
-      )
-    }
-
-    guard response.status == "completed" else {
-      throw AppError.invalidResponse(
-        "AIの解析が完了していません。もう一度お試しください。"
-      )
-    }
-
-    let contents = response.output
-      .filter { $0.type == "message" }
-      .flatMap { $0.content ?? [] }
-
-    if contents.contains(where: { $0.type == "refusal" }) {
+    switch response.stopReason {
+    case "refusal":
       // 拒否本文は会議内容を含む可能性があるため、画面やログへ流しません。
-      throw AppError.openAI(
-        "AIがこの会議内容の解析を拒否しました。内容を確認してください。"
+      throw AppError.aiAnalysis(
+        "Claudeがこの会議内容の解析を拒否しました。内容を確認してください。"
       )
+    case "max_tokens":
+      throw AppError.invalidResponse(
+        "AIの解析が出力上限までに完了しませんでした。もう一度お試しください。"
+      )
+    case "model_context_window_exceeded":
+      throw AppError.invalidResponse(
+        "会議内容がClaudeの入力上限を超えています。内容を短くしてお試しください。"
+      )
+    default:
+      break
     }
 
-    let outputText =
-      contents
-      .filter { $0.type == "output_text" }
+    let outputText = response.content
+      .filter { $0.type == "text" }
       .compactMap(\.text)
       .joined()
 
@@ -205,37 +198,34 @@ actor OpenAIService: MeetingAnalysisGenerating {
 
   private func httpError(statusCode: Int) -> AppError {
     switch statusCode {
+    case 400:
+      return .aiAnalysis(
+        "Claude APIがリクエストを受け付けませんでした。入力内容を確認してください。"
+      )
     case 401, 403:
-      return .openAI(
-        "OpenAI APIの認証に失敗しました。保存したAPIキーを確認してください。"
+      return .aiAnalysis(
+        "Claude APIの認証に失敗しました。保存したAPIキーを確認してください。"
       )
     case 408:
-      return .openAI(
-        "OpenAI APIへの接続がタイムアウトしました。もう一度お試しください。"
+      return .aiAnalysis(
+        "Claude APIへの接続がタイムアウトしました。もう一度お試しください。"
+      )
+    case 413:
+      return .aiAnalysis(
+        "会議内容がClaude APIの入力上限を超えています。内容を短くしてお試しください。"
       )
     case 429:
-      return .openAI(
-        "OpenAI APIの利用上限に達しました。時間をおいてお試しください。"
+      return .aiAnalysis(
+        "Claude APIの利用上限に達しました。時間をおいてお試しください。"
       )
     case 500...599:
-      return .openAI(
-        "OpenAI APIで一時的な障害が発生しています。時間をおいてお試しください。"
+      return .aiAnalysis(
+        "Claude APIで一時的な障害が発生しています。時間をおいてお試しください。"
       )
     default:
-      return .openAI(
-        "OpenAI APIへのリクエストに失敗しました（HTTP \(statusCode)）。"
+      return .aiAnalysis(
+        "Claude APIへのリクエストに失敗しました（HTTP \(statusCode)）。"
       )
-    }
-  }
-
-  private static func incompleteReason(_ reason: String?) -> String {
-    switch reason {
-    case "max_output_tokens":
-      return "出力上限"
-    case "content_filter":
-      return "安全性フィルター"
-    default:
-      return "理由不明"
     }
   }
 

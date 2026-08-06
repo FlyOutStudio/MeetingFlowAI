@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// OpenAI APIキーの保存先をUIやAIサービスから分離する境界です。
+/// Anthropic APIキーの保存先をUIやAIサービスから分離する境界です。
 ///
 /// Keychain APIは同期APIですが、async protocolとactorで包むことでMainActorを
 /// ブロックせず、Swift 6のstrict concurrency下でも安全に利用できます。
@@ -23,7 +23,7 @@ protocol KeychainAccessing: Sendable {
 /// 環境変数fallbackは保存済み状態と混同しないようcomposition rootで合成します。
 actor KeychainAPIKeyStore: APIKeyStoring {
   static let defaultService = "jp.flyoutstudio.MeetingFlowAI"
-  static let defaultAccount = "OPENAI_API_KEY"
+  static let defaultAccount = "ANTHROPIC_API_KEY"
 
   private let service: String
   private let account: String

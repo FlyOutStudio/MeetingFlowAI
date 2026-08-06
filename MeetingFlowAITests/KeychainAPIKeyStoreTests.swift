@@ -25,6 +25,7 @@ final class KeychainAPIKeyStoreTests: XCTestCase {
     XCTAssertEqual(snapshot.deletes, 1)
     XCTAssertEqual(snapshot.lastService, KeychainAPIKeyStore.defaultService)
     XCTAssertEqual(snapshot.lastAccount, KeychainAPIKeyStore.defaultAccount)
+    XCTAssertEqual(KeychainAPIKeyStore.defaultAccount, "ANTHROPIC_API_KEY")
   }
 
   func testWhitespaceStoredValueIsTreatedAsMissing() async throws {

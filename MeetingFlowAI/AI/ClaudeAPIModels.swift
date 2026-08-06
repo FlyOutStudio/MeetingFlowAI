@@ -2,26 +2,36 @@ import Foundation
 
 // MARK: - Request
 
-/// OpenAI Responses APIへ送るリクエスト。
+/// Claude Messages APIへ送るリクエスト。
 ///
-/// API SDKへ依存せず、必要なフィールドだけを型として定義することで、
-/// APIの送受信境界を小さく保っています。
-struct ResponsesAPIRequest: Encodable {
+/// SDKへ依存せず、会議解析に必要なフィールドだけを定義します。
+struct ClaudeAPIRequest: Encodable {
   let model: String
-  let instructions: String
-  let input: String
-  let text: ResponsesTextConfiguration
-  let store: Bool
+  let maxTokens: Int
+  let system: String
+  let messages: [ClaudeInputMessage]
+  let outputConfig: ClaudeOutputConfiguration
+
+  enum CodingKeys: String, CodingKey {
+    case model
+    case maxTokens = "max_tokens"
+    case system
+    case messages
+    case outputConfig = "output_config"
+  }
 }
 
-struct ResponsesTextConfiguration: Encodable {
-  let format: ResponsesJSONSchemaFormat
+struct ClaudeInputMessage: Encodable {
+  let role: String
+  let content: String
 }
 
-struct ResponsesJSONSchemaFormat: Encodable {
+struct ClaudeOutputConfiguration: Encodable {
+  let format: ClaudeJSONSchemaFormat
+}
+
+struct ClaudeJSONSchemaFormat: Encodable {
   let type = "json_schema"
-  let name: String
-  let strict = true
   let schema: MeetingAnalysisJSONSchema
 }
 
@@ -29,7 +39,7 @@ struct ResponsesJSONSchemaFormat: Encodable {
 
 /// `MeetingAnalysis`用のJSON Schema。
 ///
-/// Structured Outputsのstrictモードに合わせ、すべてのobjectで
+/// ClaudeのStructured Outputsに合わせ、すべてのobjectで
 /// `additionalProperties: false`を指定し、全プロパティを必須にしています。
 struct MeetingAnalysisJSONSchema: Encodable {
   let type = "object"
@@ -123,30 +133,18 @@ struct StringJSONSchema: Encodable {
 
 // MARK: - Response
 
-/// Responses APIのうち、解析結果の取得とエラー判定に必要な部分だけを表します。
-struct ResponsesAPIResponse: Decodable {
-  let status: String
-  let output: [ResponsesOutputItem]
-  let incompleteDetails: ResponsesIncompleteDetails?
+/// Claude Messages API応答のうち、解析結果と停止理由だけを表します。
+struct ClaudeAPIResponse: Decodable {
+  let content: [ClaudeContentBlock]
+  let stopReason: String?
 
   enum CodingKeys: String, CodingKey {
-    case status
-    case output
-    case incompleteDetails = "incomplete_details"
+    case content
+    case stopReason = "stop_reason"
   }
 }
 
-struct ResponsesOutputItem: Decodable {
-  let type: String
-  let content: [ResponsesOutputContent]?
-}
-
-struct ResponsesOutputContent: Decodable {
+struct ClaudeContentBlock: Decodable {
   let type: String
   let text: String?
-  let refusal: String?
-}
-
-struct ResponsesIncompleteDetails: Decodable {
-  let reason: String?
 }

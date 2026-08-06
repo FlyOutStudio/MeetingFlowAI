@@ -77,7 +77,7 @@ final class MeetingViewModelTests: XCTestCase {
     let speech = SpeechServiceStub()
     let expected = Self.analysis(summary: "再試行成功")
     let analysisService = SequencedAnalysisService([
-      .failure(.openAI("一時的な失敗")),
+      .failure(.aiAnalysis("一時的な失敗")),
       .success(expected),
     ])
     let speechFactory = SpeechServiceFactoryStub([speech])
@@ -455,7 +455,7 @@ private actor SequencedAnalysisService: MeetingAnalysisGenerating {
   func analyze(title: String, transcript: String) async throws -> MeetingAnalysis {
     callCount += 1
     guard !outcomes.isEmpty else {
-      throw AppError.openAI("テスト用AI応答が不足しています。")
+      throw AppError.aiAnalysis("テスト用AI応答が不足しています。")
     }
 
     switch outcomes.removeFirst() {

@@ -6,8 +6,8 @@ struct APIKeySettingsView: View {
 
   var body: some View {
     Form {
-      Section("OpenAI") {
-        LabeledContent("AIモデル", value: "gpt-5.5")
+      Section("Claude") {
+        LabeledContent("AIモデル", value: ClaudeService.model)
 
         LabeledContent("APIキー") {
           Label(
@@ -18,7 +18,7 @@ struct APIKeySettingsView: View {
           .foregroundStyle(viewModel.isConfigured ? .green : .gray)
         }
 
-        SecureField("OpenAI APIキーを入力", text: $viewModel.apiKeyInput)
+        SecureField("Anthropic APIキーを入力", text: $viewModel.apiKeyInput)
           .textFieldStyle(.roundedBorder)
           .disabled(viewModel.isBusy)
           .onSubmit { viewModel.save() }
@@ -54,7 +54,7 @@ struct APIKeySettingsView: View {
 
       Section("セキュリティ") {
         Text("APIキーはmacOSのログインKeychainへ保存します。保存済みの値を画面へ再表示したり、ソースコードや設定ファイルへ書き込んだりしません。")
-        Text("Xcodeの個人用SchemeにOPENAI_API_KEYがある場合は、Keychain未設定時の開発用フォールバックとして利用します。")
+        Text("Xcodeの個人用SchemeにANTHROPIC_API_KEYがある場合は、Keychain未設定時の開発用フォールバックとして利用します。")
           .foregroundStyle(.secondary)
       }
       .font(.caption)

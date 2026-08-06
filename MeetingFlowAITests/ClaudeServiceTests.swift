@@ -3,7 +3,7 @@ import XCTest
 
 @testable import MeetingFlowAI
 
-final class OpenAIServiceTests: XCTestCase {
+final class ClaudeServiceTests: XCTestCase {
   private var session: URLSession!
 
   override func setUp() {
@@ -24,41 +24,51 @@ final class OpenAIServiceTests: XCTestCase {
 
   func testAnalyzeSendsStrictSchemaAndBuildsMermaidFromFlow() async throws {
     URLProtocolStub.handler = { request in
-      XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/responses")
+      XCTAssertEqual(
+        request.url?.absoluteString,
+        "https://api.anthropic.com/v1/messages"
+      )
       XCTAssertEqual(request.httpMethod, "POST")
       XCTAssertEqual(
-        request.value(forHTTPHeaderField: "Authorization"),
-        "Bearer test-api-key"
+        request.value(forHTTPHeaderField: "x-api-key"),
+        "test-api-key"
+      )
+      XCTAssertEqual(
+        request.value(forHTTPHeaderField: "anthropic-version"),
+        "2023-06-01"
       )
       XCTAssertEqual(
         request.value(forHTTPHeaderField: "Content-Type"),
         "application/json"
       )
+      XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
 
       let body = try XCTUnwrap(Self.bodyData(from: request))
       let json = try XCTUnwrap(
         JSONSerialization.jsonObject(with: body) as? [String: Any]
       )
 
-      XCTAssertEqual(json["model"] as? String, "gpt-5.5")
-      XCTAssertEqual(json["store"] as? Bool, false)
+      XCTAssertEqual(json["model"] as? String, "claude-sonnet-5")
+      XCTAssertEqual(json["max_tokens"] as? Int, 16_384)
+      XCTAssertNil(json["store"])
       XCTAssertFalse(String(data: body, encoding: .utf8)?.contains("test-api-key") ?? true)
 
-      let input = try XCTUnwrap(json["input"] as? String)
+      let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
+      XCTAssertEqual(messages.count, 1)
+      XCTAssertEqual(messages[0]["role"] as? String, "user")
+      let input = try XCTUnwrap(messages[0]["content"] as? String)
       XCTAssertTrue(input.contains("受注フロー改善会議"))
       XCTAssertTrue(input.contains("受注内容を営業が確認する"))
 
-      let instructions = try XCTUnwrap(json["instructions"] as? String)
-      XCTAssertTrue(instructions.contains("推測または補完しない"))
-      XCTAssertTrue(instructions.contains("ownerまたはdeadlineを空文字"))
-      XCTAssertTrue(instructions.contains("priorityをMedium"))
-      XCTAssertTrue(instructions.contains("JSON以外は出力しない"))
+      let system = try XCTUnwrap(json["system"] as? String)
+      XCTAssertTrue(system.contains("推測または補完しない"))
+      XCTAssertTrue(system.contains("ownerまたはdeadlineを空文字"))
+      XCTAssertTrue(system.contains("priorityをMedium"))
+      XCTAssertTrue(system.contains("JSON以外は出力しない"))
 
-      let text = try XCTUnwrap(json["text"] as? [String: Any])
-      let format = try XCTUnwrap(text["format"] as? [String: Any])
+      let outputConfig = try XCTUnwrap(json["output_config"] as? [String: Any])
+      let format = try XCTUnwrap(outputConfig["format"] as? [String: Any])
       XCTAssertEqual(format["type"] as? String, "json_schema")
-      XCTAssertEqual(format["name"] as? String, "meeting_analysis")
-      XCTAssertEqual(format["strict"] as? Bool, true)
 
       let schema = try XCTUnwrap(format["schema"] as? [String: Any])
       XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
@@ -178,10 +188,11 @@ final class OpenAIServiceTests: XCTestCase {
       Self.response(
         statusCode: 401,
         json: [
+          "type": "error",
           "error": [
-            "code": "invalid_api_key",
+            "type": "authentication_error",
             "message": "Invalid API key",
-          ]
+          ],
         ]
       )
     }
@@ -201,20 +212,13 @@ final class OpenAIServiceTests: XCTestCase {
       Self.response(
         statusCode: 200,
         json: [
-          "status": "completed",
-          "output": [
+          "content": [
             [
-              "type": "message",
-              "content": [
-                [
-                  "type": "refusal",
-                  "refusal": "Sensitive refusal detail",
-                ]
-              ],
+              "type": "text",
+              "text": "Sensitive refusal detail",
             ]
           ],
-          "incomplete_details": NSNull(),
-          "error": NSNull(),
+          "stop_reason": "refusal",
         ]
       )
     }
@@ -229,15 +233,13 @@ final class OpenAIServiceTests: XCTestCase {
     )
   }
 
-  func testAnalyzeMapsIncompleteResponseToJapaneseAppError() async {
+  func testAnalyzeMapsMaxTokensToJapaneseAppError() async {
     URLProtocolStub.handler = { _ in
       Self.response(
         statusCode: 200,
         json: [
-          "status": "incomplete",
-          "output": [],
-          "incomplete_details": ["reason": "max_output_tokens"],
-          "error": NSNull(),
+          "content": [],
+          "stop_reason": "max_tokens",
         ]
       )
     }
@@ -291,7 +293,7 @@ final class OpenAIServiceTests: XCTestCase {
       return Self.response(statusCode: 500, json: [:])
     }
 
-    let service = OpenAIService(
+    let service = ClaudeService(
       session: session,
       apiKeyProvider: {
         throw AppError.keychain("テスト用の読み込み失敗")
@@ -312,7 +314,7 @@ final class OpenAIServiceTests: XCTestCase {
       return Self.response(statusCode: 500, json: [:])
     }
 
-    let service = OpenAIService(
+    let service = ClaudeService(
       session: session,
       apiKeyProvider: {
         throw CancellationError()
@@ -327,8 +329,8 @@ final class OpenAIServiceTests: XCTestCase {
     )
   }
 
-  private func makeService(apiKey: String? = "test-api-key") -> OpenAIService {
-    OpenAIService(
+  private func makeService(apiKey: String? = "test-api-key") -> ClaudeService {
+    ClaudeService(
       session: session,
       apiKeyProvider: { apiKey }
     )
@@ -399,20 +401,13 @@ final class OpenAIServiceTests: XCTestCase {
     analysisText: String
   ) -> [String: Any] {
     [
-      "status": "completed",
-      "output": [
+      "content": [
         [
-          "type": "message",
-          "content": [
-            [
-              "type": "output_text",
-              "text": analysisText,
-            ]
-          ],
+          "type": "text",
+          "text": analysisText,
         ]
       ],
-      "incomplete_details": NSNull(),
-      "error": NSNull(),
+      "stop_reason": "end_turn",
     ]
   }
 
@@ -421,7 +416,7 @@ final class OpenAIServiceTests: XCTestCase {
     json: [String: Any]
   ) -> (HTTPURLResponse, Data) {
     let response = HTTPURLResponse(
-      url: URL(string: "https://api.openai.com/v1/responses")!,
+      url: URL(string: "https://api.anthropic.com/v1/messages")!,
       statusCode: statusCode,
       httpVersion: nil,
       headerFields: ["Content-Type": "application/json"]
