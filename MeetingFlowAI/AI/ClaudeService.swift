@@ -212,11 +212,14 @@ actor ClaudeService: MeetingAnalysisGenerating {
       }
     }
 
+    var invalidJSONObjectCandidate: Data?
     if let firstBrace = trimmed.firstIndex(of: "{"),
        let lastBrace = trimmed.lastIndex(of: "}"),
        firstBrace < lastBrace
     {
-      candidates.append(String(trimmed[firstBrace...lastBrace]))
+      let candidate = String(trimmed[firstBrace...lastBrace])
+      candidates.append(candidate)
+      invalidJSONObjectCandidate = candidate.data(using: .utf8)
     }
 
     for candidate in candidates {
@@ -225,7 +228,9 @@ actor ClaudeService: MeetingAnalysisGenerating {
         return data
       }
     }
-    return nil
+    // `{...}`の形はあるがJSON構文が壊れている場合は、呼び出し側で
+    // 「JSONを解析できない」エラーとして扱えるよう候補を返します。
+    return invalidJSONObjectCandidate
   }
 
   private func httpError(statusCode: Int) -> AppError {
