@@ -38,8 +38,8 @@ struct MeetingWorkspaceView: View {
     }
     .frame(
       minWidth: 1_120,
-      minHeight: 680,
       maxWidth: .infinity,
+      minHeight: 680,
       maxHeight: .infinity,
       alignment: .topLeading
     )
