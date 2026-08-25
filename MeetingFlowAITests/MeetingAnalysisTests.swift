@@ -172,6 +172,32 @@ final class MeetingAnalysisTests: XCTestCase {
     }
   }
 
+  func testAIDecoderNormalizesNonFatalContractDifferences() throws {
+    let source = """
+      {
+        "summary": "要約",
+        "todo": [
+          {"title": " ", "owner": "", "deadline": "", "priority": "Medium"},
+          {"title": "実行", "owner": "", "deadline": "", "priority": "Unknown"}
+        ],
+        "flow": [
+          {"id": "A", "actor": "営業", "action": "確認", "next": [{"to": "missing", "label": "No"}]},
+          {"id": "A", "actor": "管理部", "action": "承認", "next": []},
+          {"id": "B", "actor": "", "action": " ", "next": []}
+        ]
+      }
+      """
+
+    let analysis = try MeetingAnalysis.decodeAIOutput(
+      from: XCTUnwrap(source.data(using: .utf8))
+    )
+
+    XCTAssertEqual(analysis.todo.map(\.title), ["実行"])
+    XCTAssertEqual(analysis.todo.first?.priority, .medium)
+    XCTAssertEqual(analysis.flow.map(\.id), ["A", "A-2"])
+    XCTAssertTrue(analysis.flow.allSatisfy { $0.next.isEmpty })
+  }
+
   func testPriorityUsesSchemaRawValues() throws {
     XCTAssertEqual(TodoPriority.allCases.map(\.rawValue), ["High", "Medium", "Low"])
 

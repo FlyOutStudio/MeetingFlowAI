@@ -181,19 +181,51 @@ actor ClaudeService: MeetingAnalysisGenerating {
       .compactMap(\.text)
       .joined()
 
-    guard !outputText.isEmpty, let jsonData = outputText.data(using: .utf8) else {
+    guard let jsonData = Self.jsonData(from: outputText) else {
       throw AppError.invalidResponse(
         "AIの解析結果にJSONが含まれていませんでした。"
       )
     }
 
     do {
-      return try JSONDecoder().decode(MeetingAnalysis.self, from: jsonData)
+      return try MeetingAnalysis.decodeAIOutput(from: jsonData)
     } catch {
       throw AppError.invalidResponse(
         "AIが返したJSONを解析できませんでした。もう一度お試しください。"
       )
     }
+  }
+
+  /// Structured Outputは通常そのままのJSONですが、互換性のためMarkdownの
+  /// code fenceや短い前置きが付いた場合もJSONオブジェクトだけを取り出します。
+  private static func jsonData(from text: String) -> Data? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    var candidates = [trimmed]
+    if trimmed.hasPrefix("```") {
+      let lines = trimmed.components(separatedBy: .newlines)
+      if lines.count >= 3 {
+        candidates.append(
+          lines.dropFirst().dropLast().joined(separator: "\n")
+        )
+      }
+    }
+
+    if let firstBrace = trimmed.firstIndex(of: "{"),
+       let lastBrace = trimmed.lastIndex(of: "}"),
+       firstBrace < lastBrace
+    {
+      candidates.append(String(trimmed[firstBrace...lastBrace]))
+    }
+
+    for candidate in candidates {
+      guard let data = candidate.data(using: .utf8) else { continue }
+      if (try? JSONSerialization.jsonObject(with: data)) != nil {
+        return data
+      }
+    }
+    return nil
   }
 
   private func httpError(statusCode: Int) -> AppError {

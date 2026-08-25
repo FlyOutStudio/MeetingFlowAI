@@ -272,6 +272,61 @@ final class ClaudeServiceTests: XCTestCase {
     )
   }
 
+  func testAnalyzeAcceptsJSONCodeFence() async throws {
+    URLProtocolStub.handler = { _ in
+      let analysis = """
+        ```json
+        {"summary":"要約","todo":[],"flow":[]}
+        ```
+        """
+      return Self.response(
+        statusCode: 200,
+        json: Self.completedResponseJSON(analysisText: analysis)
+      )
+    }
+
+    let service = makeService()
+    let result = try await service.analyze(title: "会議", transcript: "会議内容")
+
+    XCTAssertEqual(result.summary, "要約")
+    XCTAssertTrue(result.flow.isEmpty)
+  }
+
+  func testAnalyzeNormalizesNonFatalFlowAndTodoIssues() async throws {
+    URLProtocolStub.handler = { _ in
+      return Self.response(
+        statusCode: 200,
+        json: try Self.completedResponseJSON(
+          analysis: [
+            "summary": "要約",
+            "todo": [
+              ["title": "  ", "owner": "", "deadline": "", "priority": "Medium"],
+              ["title": "実行する", "owner": "", "deadline": "", "priority": "Unknown"],
+            ],
+            "flow": [
+              [
+                "id": "A",
+                "actor": "営業",
+                "action": "確認",
+                "next": [["to": "missing", "label": "No"]],
+              ],
+              ["id": "A", "actor": "管理部", "action": "承認", "next": []],
+              ["id": "B", "actor": "", "action": "  ", "next": []],
+            ],
+          ]
+        )
+      )
+    }
+
+    let service = makeService()
+    let result = try await service.analyze(title: "会議", transcript: "会議内容")
+
+    XCTAssertEqual(result.todo.map(\.title), ["実行する"])
+    XCTAssertEqual(result.todo.first?.priority, .medium)
+    XCTAssertEqual(result.flow.map(\.id), ["A", "A-2"])
+    XCTAssertTrue(result.flow.allSatisfy { $0.next.isEmpty })
+  }
+
   func testAnalyzeMapsURLSessionCancellationToAppError() async {
     URLProtocolStub.handler = { _ in
       throw URLError(.cancelled)
