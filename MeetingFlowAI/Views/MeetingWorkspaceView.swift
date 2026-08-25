@@ -7,10 +7,22 @@ struct MeetingWorkspaceView: View {
   var body: some View {
     HSplitView {
       MeetingHistorySidebar(viewModel: viewModel)
-        .frame(minWidth: 220, idealWidth: 250, maxWidth: 300)
+        .frame(
+          minWidth: 220,
+          idealWidth: 250,
+          maxWidth: 300,
+          maxHeight: .infinity,
+          alignment: .top
+        )
 
       ControlPanelView(viewModel: viewModel)
-        .frame(minWidth: 260, idealWidth: 300, maxWidth: 340)
+        .frame(
+          minWidth: 260,
+          idealWidth: 300,
+          maxWidth: 340,
+          maxHeight: .infinity,
+          alignment: .top
+        )
 
       VStack(spacing: 0) {
         TranscriptView(transcript: viewModel.transcript)
@@ -22,9 +34,15 @@ struct MeetingWorkspaceView: View {
             .frame(minHeight: 330)
         }
       }
-      .frame(minWidth: 620)
+      .frame(minWidth: 620, maxHeight: .infinity, alignment: .top)
     }
-    .frame(minWidth: 1_120, minHeight: 680)
+    .frame(
+      minWidth: 1_120,
+      minHeight: 680,
+      maxWidth: .infinity,
+      maxHeight: .infinity,
+      alignment: .topLeading
+    )
     .alert(
       "エラー",
       isPresented: Binding(
