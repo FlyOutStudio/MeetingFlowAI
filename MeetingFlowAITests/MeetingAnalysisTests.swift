@@ -242,7 +242,7 @@ final class MeetingAnalysisTests: XCTestCase {
       from: XCTUnwrap(source.data(using: .utf8))
     )
 
-    XCTAssertEqual(analysis.summary, "")
+    XCTAssertTrue(analysis.summary.contains("## 会議の目的・背景"))
     XCTAssertEqual(analysis.todo.count, 1)
     XCTAssertEqual(analysis.todo.first?.owner, "")
     XCTAssertEqual(analysis.todo.first?.deadline, "")

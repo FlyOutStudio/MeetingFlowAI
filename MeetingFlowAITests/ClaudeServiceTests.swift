@@ -293,7 +293,8 @@ final class ClaudeServiceTests: XCTestCase {
     let service = makeService()
     let result = try await service.analyze(title: "会議", transcript: "会議内容")
 
-    XCTAssertEqual(result.summary, "要約")
+    XCTAssertTrue(result.summary.contains("要約"))
+    XCTAssertTrue(result.summary.contains("## 会議の目的・背景"))
     XCTAssertTrue(result.flow.isEmpty)
   }
 
