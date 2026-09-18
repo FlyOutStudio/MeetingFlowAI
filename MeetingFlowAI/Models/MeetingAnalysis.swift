@@ -143,6 +143,19 @@ private struct AIMeetingAnalysisPayload: Decodable {
   let todo: [AITodoItem]
   let flow: [AIFlowStep]
 
+  private enum CodingKeys: String, CodingKey {
+    case summary
+    case todo
+    case flow
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    summary = container.string(forKey: .summary)
+    todo = container.array(of: AITodoItem.self, forKey: .todo)
+    flow = container.array(of: AIFlowStep.self, forKey: .flow)
+  }
+
   func normalized() -> MeetingAnalysis {
     let normalizedTodo = todo.compactMap { item -> TodoItem? in
       let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -215,6 +228,21 @@ private struct AITodoItem: Decodable {
   let owner: String
   let deadline: String
   let priority: String
+
+  private enum CodingKeys: String, CodingKey {
+    case title
+    case owner
+    case deadline
+    case priority
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    title = container.string(forKey: .title)
+    owner = container.string(forKey: .owner)
+    deadline = container.string(forKey: .deadline)
+    priority = container.string(forKey: .priority)
+  }
 }
 
 private struct AIFlowStep: Decodable {
@@ -222,11 +250,52 @@ private struct AIFlowStep: Decodable {
   let actor: String
   let action: String
   let next: [AIFlowTransition]
+
+  private enum CodingKeys: String, CodingKey {
+    case id
+    case actor
+    case action
+    case next
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = container.string(forKey: .id)
+    actor = container.string(forKey: .actor)
+    action = container.string(forKey: .action)
+    next = container.array(of: AIFlowTransition.self, forKey: .next)
+  }
 }
 
 private struct AIFlowTransition: Decodable {
   let to: String
   let label: String
+
+  private enum CodingKeys: String, CodingKey {
+    case to
+    case label
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    to = container.string(forKey: .to)
+    label = container.string(forKey: .label)
+  }
+}
+
+private extension KeyedDecodingContainer {
+  /// Structured Outputから外れた`null`や省略は、AI応答に限って未入力値として扱う。
+  /// 値の型が異なる場合も空値にし、保存済みデータのデコード契約は緩めない。
+  func string(forKey key: Key) -> String {
+    (try? decodeIfPresent(String.self, forKey: key)) ?? ""
+  }
+
+  func array<Element: Decodable>(
+    of type: Element.Type,
+    forKey key: Key
+  ) -> [Element] {
+    (try? decodeIfPresent([Element].self, forKey: key)) ?? []
+  }
 }
 
 /// 会議から抽出した実行項目です。

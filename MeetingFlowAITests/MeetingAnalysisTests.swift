@@ -198,6 +198,34 @@ final class MeetingAnalysisTests: XCTestCase {
     XCTAssertTrue(analysis.flow.allSatisfy { $0.next.isEmpty })
   }
 
+  func testAIDecoderTreatsMissingOrNullFieldsAsEmptyValues() throws {
+    let source = """
+      {
+        "summary": null,
+        "todo": [
+          {"title": "確認", "owner": null, "deadline": null, "priority": null},
+          {"owner": "田中"}
+        ],
+        "flow": [
+          {"id": "A", "actor": null, "action": "確認", "next": null},
+          {"id": "B", "actor": "営業", "action": "共有", "next": [{"to": "A"}]}
+        ]
+      }
+      """
+
+    let analysis = try MeetingAnalysis.decodeAIOutput(
+      from: XCTUnwrap(source.data(using: .utf8))
+    )
+
+    XCTAssertEqual(analysis.summary, "")
+    XCTAssertEqual(analysis.todo.count, 1)
+    XCTAssertEqual(analysis.todo.first?.owner, "")
+    XCTAssertEqual(analysis.todo.first?.deadline, "")
+    XCTAssertEqual(analysis.todo.first?.priority, .medium)
+    XCTAssertEqual(analysis.flow.map(\.id), ["A", "B"])
+    XCTAssertEqual(analysis.flow[1].next, [FlowTransition(to: "A", label: "")])
+  }
+
   func testPriorityUsesSchemaRawValues() throws {
     XCTAssertEqual(TodoPriority.allCases.map(\.rawValue), ["High", "Medium", "Low"])
 
