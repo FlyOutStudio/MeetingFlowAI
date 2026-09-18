@@ -29,6 +29,7 @@ final class ClaudeServiceTests: XCTestCase {
         "https://api.anthropic.com/v1/messages"
       )
       XCTAssertEqual(request.httpMethod, "POST")
+      XCTAssertEqual(request.timeoutInterval, 120)
       XCTAssertEqual(
         request.value(forHTTPHeaderField: "x-api-key"),
         "test-api-key"
@@ -339,6 +340,21 @@ final class ClaudeServiceTests: XCTestCase {
         try await service.analyze(title: "会議", transcript: "会議内容")
       },
       contains: "キャンセル"
+    )
+  }
+
+  func testAnalyzeMapsURLSessionTimeoutToJapaneseAppError() async {
+    URLProtocolStub.handler = { _ in
+      throw URLError(.timedOut)
+    }
+
+    let service = makeService()
+
+    await assertAppError(
+      from: {
+        try await service.analyze(title: "会議", transcript: "会議内容")
+      },
+      contains: "時間内に完了"
     )
   }
 

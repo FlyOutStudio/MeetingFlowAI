@@ -18,6 +18,7 @@ actor ClaudeService: MeetingAnalysisGenerating {
     string: "https://api.anthropic.com/v1/messages"
   )!
   private static let apiVersion = "2023-06-01"
+  private static let requestTimeout: TimeInterval = 120
 
   private let session: URLSession
   private let endpoint: URL
@@ -75,8 +76,31 @@ actor ClaudeService: MeetingAnalysisGenerating {
       (data, response) = try await session.data(for: request)
     } catch is CancellationError {
       throw AppError.cancelled
-    } catch let error as URLError where error.code == .cancelled {
-      throw AppError.cancelled
+    } catch let error as URLError {
+      switch error.code {
+      case .cancelled:
+        throw AppError.cancelled
+      case .timedOut:
+        throw AppError.aiAnalysis(
+          "Claude APIの応答が時間内に完了しませんでした。会議内容を短くしてもう一度お試しください。"
+        )
+      case .notConnectedToInternet:
+        throw AppError.aiAnalysis(
+          "インターネットに接続されていません。ネットワーク接続を確認してください。"
+        )
+      case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+        throw AppError.aiAnalysis(
+          "Claude APIへ接続できませんでした。ネットワークまたはDNS設定を確認してください。"
+        )
+      case .networkConnectionLost:
+        throw AppError.aiAnalysis(
+          "Claude APIとの通信が中断されました。もう一度お試しください。"
+        )
+      default:
+        throw AppError.aiAnalysis(
+          "Claudeに接続できませんでした。ネットワーク接続を確認してください。"
+        )
+      }
     } catch {
       throw AppError.aiAnalysis(
         "Claudeに接続できませんでした。ネットワーク接続を確認してください。"
@@ -138,7 +162,11 @@ actor ClaudeService: MeetingAnalysisGenerating {
       )
     )
 
-    var request = URLRequest(url: endpoint)
+    var request = URLRequest(
+      url: endpoint,
+      cachePolicy: .useProtocolCachePolicy,
+      timeoutInterval: Self.requestTimeout
+    )
     request.httpMethod = "POST"
     request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
     request.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
