@@ -130,11 +130,55 @@ extension MeetingAnalysis {
   /// 通常の`JSONDecoder`を使うため、保存データの契約は緩めません。
   static func decodeAIOutput(from data: Data) throws -> MeetingAnalysis {
     do {
-      return try JSONDecoder().decode(MeetingAnalysis.self, from: data)
+      return try JSONDecoder()
+        .decode(MeetingAnalysis.self, from: data)
+        .withRequiredMinutesSections()
     } catch {
       let payload = try JSONDecoder().decode(AIMeetingAnalysisPayload.self, from: data)
-      return payload.normalized()
+      return payload.normalized().withRequiredMinutesSections()
     }
+  }
+
+  /// AI出力だけは、議事録タブで必要な見出しを常に表示する。
+  /// 保存済みの議事録やExport JSONのdecode契約は変更しない。
+  private func withRequiredMinutesSections() -> MeetingAnalysis {
+    MeetingAnalysis(
+      summary: MinutesSummaryFormatter.normalized(summary),
+      todo: todo,
+      flow: flow
+    )
+  }
+}
+
+private enum MinutesSummaryFormatter {
+  static let requiredSections = [
+    "会議の目的・背景",
+    "主な議論",
+    "決定事項",
+    "未決事項・確認事項",
+    "次の対応",
+  ]
+
+  static func normalized(_ summary: String) -> String {
+    var blocks: [String] = []
+    let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmed.isEmpty {
+      blocks.append(trimmed)
+    }
+
+    for section in requiredSections where !containsHeading(section, in: trimmed) {
+      blocks.append("## \(section)\n- 会議内で明確になりませんでした。")
+    }
+
+    return blocks.joined(separator: "\n\n")
+  }
+
+  private static func containsHeading(_ section: String, in summary: String) -> Bool {
+    let expectedHeading = "## \(section)"
+    return summary
+      .components(separatedBy: .newlines)
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .contains { $0 == expectedHeading || $0.hasPrefix("\(expectedHeading) ") }
   }
 }
 

@@ -11,8 +11,8 @@ MeetingFlowAIは、対面会議やオンライン会議の音声をリアルタ�
 - Start / Stopだけのシンプルな会議録音
 - 録音中のリアルタイム文字起こしとスクロール表示
 - Claude Messages API（`claude-sonnet-5`）とJSON Schemaによる構造化出力
-- Markdown形式の議事録
-- タイトル、担当、期限、優先度を持つToDo表
+- 目的・背景、主な議論、決定事項、未決事項、次の対応を必ず含むMarkdown形式の議事録
+- 議事録の「次の対応」から、会議で明示された実行事項だけを抽出するToDo表
 - 部門・担当者、アクション、次工程を保持する構造化業務フロー
 - 構造化フローを正本として生成するMermaid `flowchart TD`
 - Markdown（`.md`）、Mermaid（`.mmd`）、JSONの書き出し

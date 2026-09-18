@@ -65,6 +65,8 @@ final class ClaudeServiceTests: XCTestCase {
       XCTAssertTrue(system.contains("推測または補完しない"))
       XCTAssertTrue(system.contains("ownerまたはdeadlineを空文字"))
       XCTAssertTrue(system.contains("priorityをMedium"))
+      XCTAssertTrue(system.contains("## 会議の目的・背景"))
+      XCTAssertTrue(system.contains("次の対応"))
       XCTAssertTrue(system.contains("JSON以外は出力しない"))
 
       let outputConfig = try XCTUnwrap(json["output_config"] as? [String: Any])
@@ -157,7 +159,9 @@ final class ClaudeServiceTests: XCTestCase {
       transcript: "受注内容を営業が確認する。その後、管理部が在庫を確認する。"
     )
 
-    XCTAssertEqual(result.summary, "# 要点\n受注確認を標準化する。")
+    XCTAssertTrue(result.summary.contains("# 要点\n受注確認を標準化する。"))
+    XCTAssertTrue(result.summary.contains("## 会議の目的・背景"))
+    XCTAssertTrue(result.summary.contains("## 次の対応"))
     XCTAssertEqual(result.todo.first?.owner, "田中")
     XCTAssertEqual(result.flow.map(\.id), ["1", "2"])
     XCTAssertEqual(

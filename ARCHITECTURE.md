@@ -31,13 +31,14 @@ flowchart LR
 1. `MeetingViewModel`が会議タイトルと確定済み文字起こしを`MeetingAnalysisGenerating.analyze`へ渡します。
 2. `ClaudeService`がKeychainを優先してAnthropic APIキーを取得します。
 3. Claude Messages APIへsystem prompt、user message、`MeetingAnalysis`用JSON Schemaを送信します。
-4. Structured Outputsのtext blockを`MeetingAnalysis`へdecodeします。
+4. Structured Outputsのtext blockを`MeetingAnalysis`へdecodeし、AI出力に限って議事録の必須見出しを補完します。
 5. `flow`からアプリ側でMermaidを生成します。ClaudeにはMermaid生成を任せません。
 
 ## 設計判断
 
 - Anthropic SDKは追加せず`URLSession`を使用し、依存追加と移行差分を抑えています。
 - Structured Outputsで既存JSON Schemaを維持し、UI・Export・Mermaid生成への影響をなくしています。
+- 議事録は目的・背景、主な議論、決定事項、未決事項・確認事項、次の対応を必須見出しとし、実行事項だけをToDoへ重複表示します。
 - APIキーはKeychainへ保存し、保存値を画面へ再表示しません。
 - 旧OpenAIキーとAnthropicキーを混同しないよう、Keychain accountを`ANTHROPIC_API_KEY`へ変更しています。
 - エラー本文には会議内容が含まれる可能性があるため、画面やログへそのまま出しません。

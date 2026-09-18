@@ -198,6 +198,31 @@ final class MeetingAnalysisTests: XCTestCase {
     XCTAssertTrue(analysis.flow.allSatisfy { $0.next.isEmpty })
   }
 
+  func testAIDecoderAddsMissingMinutesSections() throws {
+    let source = """
+      {
+        "summary": "受注確認の運用を見直すことで合意した。",
+        "todo": [],
+        "flow": []
+      }
+      """
+
+    let analysis = try MeetingAnalysis.decodeAIOutput(
+      from: XCTUnwrap(source.data(using: .utf8))
+    )
+
+    XCTAssertTrue(analysis.summary.contains("受注確認の運用を見直すことで合意した。"))
+    for section in [
+      "会議の目的・背景",
+      "主な議論",
+      "決定事項",
+      "未決事項・確認事項",
+      "次の対応",
+    ] {
+      XCTAssertTrue(analysis.summary.contains("## \(section)"))
+    }
+  }
+
   func testAIDecoderTreatsMissingOrNullFieldsAsEmptyValues() throws {
     let source = """
       {

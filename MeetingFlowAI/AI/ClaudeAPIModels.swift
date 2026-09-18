@@ -50,7 +50,7 @@ struct MeetingAnalysisJSONSchema: Encodable {
 
 struct MeetingAnalysisPropertiesSchema: Encodable {
   let summary = StringJSONSchema(
-    description: "会議の要点を整理したMarkdown文字列。発言にない内容を補わない。"
+    description: "会議の議事録を整理したMarkdown文字列。目的・背景、主な議論、決定事項、未決事項・確認事項、次の対応の見出しを必ず含め、発言にない内容を補わない。"
   )
   let todo = ArrayJSONSchema(items: TodoItemJSONSchema())
   let flow = ArrayJSONSchema(items: FlowStepJSONSchema())
