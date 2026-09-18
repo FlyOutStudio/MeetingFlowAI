@@ -280,7 +280,9 @@ final class ClaudeServiceTests: XCTestCase {
   }
 
   func testAnalyzePreservesMeaningfulContentError() async {
+    let state = AnalysisRetryTestState()
     URLProtocolStub.handler = { _ in
+      state.recordRequest()
       Self.response(
         statusCode: 200,
         json: Self.completedResponseJSON(
@@ -297,6 +299,48 @@ final class ClaudeServiceTests: XCTestCase {
       },
       contains: "有効な内容がありません"
     )
+
+    XCTAssertEqual(state.requestCount, 2)
+  }
+
+  func testAnalyzeRetriesInvalidOutputWithCorrectiveInstructions() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { request in
+      let attempt = state.recordRequest()
+      let body = try XCTUnwrap(Self.bodyData(from: request))
+      let json = try XCTUnwrap(
+        JSONSerialization.jsonObject(with: body) as? [String: Any]
+      )
+      let system = try XCTUnwrap(json["system"] as? String)
+
+      if attempt == 1 {
+        XCTAssertFalse(system.contains("これは会議解析の再要求です"))
+        return Self.response(
+          statusCode: 200,
+          json: Self.completedResponseJSON(
+            analysisText: "{\"summary\":\"placeholder\",\"todo\":[],\"flow\":[]}"
+          )
+        )
+      }
+
+      XCTAssertTrue(system.contains("これは会議解析の再要求です"))
+      return Self.response(
+        statusCode: 200,
+        json: try Self.completedResponseJSON(
+          analysis: [
+            "summary": "会議ではCSV連携の課題を確認した。",
+            "todo": [],
+            "flow": [],
+          ]
+        )
+      )
+    }
+
+    let service = makeService()
+    let result = try await service.analyze(title: "会議", transcript: "CSV連携の課題を確認した。")
+
+    XCTAssertEqual(state.requestCount, 2)
+    XCTAssertTrue(result.summary.contains("CSV連携の課題"))
   }
 
   func testAnalyzeAcceptsJSONCodeFence() async throws {
@@ -557,4 +601,23 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
   }
 
   override func stopLoading() {}
+}
+
+private final class AnalysisRetryTestState: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  @discardableResult
+  func recordRequest() -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    count += 1
+    return count
+  }
+
+  var requestCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return count
+  }
 }

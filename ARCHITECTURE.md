@@ -33,7 +33,7 @@ flowchart LR
 1. `MeetingViewModel`が会議タイトルと確定済み文字起こしを`MeetingAnalysisGenerating.analyze`へ渡します。
 2. `ClaudeService`がKeychainを優先してAnthropic APIキーを取得します。
 3. Claude Messages APIへsystem prompt、user message、`MeetingAnalysis`用JSON Schemaを送信します。
-4. Structured Outputsのtext blockを`MeetingAnalysis`へdecodeし、AI出力に限って議事録の必須見出しを補完します。
+4. Structured Outputsのtext blockを`MeetingAnalysis`へdecodeし、AI出力に限って議事録の必須見出しを補完します。内容不足または壊れたJSONの場合だけ、保存前に具体的な修正指示で1回再要求します。
 5. `flow`からアプリ側でMermaidを生成します。ClaudeにはMermaid生成を任せません。
 
 ## 設計判断
@@ -46,6 +46,7 @@ flowchart LR
 - エラー本文には会議内容が含まれる可能性があるため、画面やログへそのまま出しません。
 - SwiftDataにはタイトル、文字起こし、構造化解析結果、作成・更新日時だけを保存します。録音音声と読み込み元音声は保存しません。
 - AIを再生成する直前の有効な解析は、SwiftDataを上書きする前にApplication Supportへ退避します。直近の結果だけを「再生成前の結果に戻す」で復元できます。
+- 出力不足の自動再要求は1回だけとし、認証・通信・利用上限・会議本文の上限エラーは再要求しません。失敗時は既存の解析結果を保持します。
 - 初期スキーマを`MeetingSchemaV1`として版管理し、将来の項目変更ではMigrationStageを追加して履歴を引き継ぎます。
 - 保存処理は`MeetingHistoryStoring`境界で分離し、ViewModelの単体テストではインメモリ実装へ差し替えます。
 
