@@ -283,7 +283,16 @@ private struct ControlPanelView: View {
         Button {
           viewModel.retryAnalysis()
         } label: {
-          Label("AI生成を再試行", systemImage: "arrow.clockwise")
+          Label(
+            viewModel.analysis == nil ? "AI生成を再試行" : "議事録を再生成",
+            systemImage: "arrow.clockwise"
+          )
+        }
+
+        if viewModel.analysis != nil {
+          Text("議事録・ToDo・業務フローを最新のAI結果で置き換えます。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
       }
 

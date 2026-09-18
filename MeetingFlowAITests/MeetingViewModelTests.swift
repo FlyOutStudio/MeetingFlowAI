@@ -117,6 +117,46 @@ final class MeetingViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testCompletedMeetingCanBeRegenerated() async throws {
+    let recording = RecordingServiceStub()
+    let speech = SpeechServiceStub()
+    let first = Self.analysis(summary: "再生成前")
+    let regenerated = Self.analysis(summary: "再生成後")
+    let analysisService = SequencedAnalysisService([.success(first), .success(regenerated)])
+    let speechFactory = SpeechServiceFactoryStub([speech])
+    let viewModel = makeViewModel(
+      recording: recording,
+      analysis: analysisService,
+      speechFactory: speechFactory
+    )
+
+    viewModel.startRecording()
+    try await waitUntil("録音状態へ遷移しませんでした。") {
+      viewModel.phase == .recording
+    }
+    await speech.emit(finalizedText: "再生成対象の会議内容")
+    try await waitUntil("文字起こしが画面へ反映されませんでした。") {
+      !viewModel.transcript.isEmpty
+    }
+
+    viewModel.stopRecording()
+    try await waitUntil("初回のAI解析が完了しませんでした。") {
+      viewModel.phase == .completed
+    }
+
+    XCTAssertEqual(viewModel.analysis, first)
+    XCTAssertTrue(viewModel.canRetryAnalysis)
+
+    viewModel.retryAnalysis()
+    try await waitUntil("完了済み会議の再生成が完了しませんでした。") {
+      viewModel.phase == .completed && viewModel.analysis == regenerated
+    }
+
+    let analysisCalls = await analysisService.numberOfCalls()
+    XCTAssertEqual(analysisCalls, 2)
+  }
+
+  @MainActor
   func testCancelledGenerationCannotOverwriteNewSession() async throws {
     let recording = RecordingServiceStub()
     let firstSpeech = SpeechServiceStub()

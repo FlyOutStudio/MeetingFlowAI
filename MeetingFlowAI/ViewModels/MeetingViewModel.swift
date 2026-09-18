@@ -78,8 +78,12 @@ final class MeetingViewModel: ObservableObject {
   }
 
   var canRetryAnalysis: Bool {
-    phase == .transcriptReady
-      && !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    switch phase {
+    case .transcriptReady, .completed:
+      !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    default:
+      false
+    }
   }
 
   var shouldShowAnalysisTabs: Bool {

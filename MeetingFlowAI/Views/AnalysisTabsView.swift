@@ -285,6 +285,13 @@ private struct MermaidSourceView: View {
         .disabled(viewModel.analysis == nil)
 
         Button {
+          openMermaidLiveEditor()
+        } label: {
+          Label("Mermaid Liveで編集", systemImage: "arrow.up.right.square")
+        }
+        .disabled(viewModel.analysis == nil)
+
+        Button {
           viewModel.export(.mermaid)
         } label: {
           Label("Export", systemImage: "square.and.arrow.up")
@@ -304,6 +311,11 @@ private struct MermaidSourceView: View {
         RoundedRectangle(cornerRadius: 8)
           .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
       }
+
+      Text("MermaidコードをコピーしてMermaid Live Editorを開きます。貼り付け後に図を編集・書き出しできます。")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(14)
   }
@@ -313,5 +325,11 @@ private struct MermaidSourceView: View {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.setString(mermaid, forType: .string)
+  }
+
+  private func openMermaidLiveEditor() {
+    copyMermaid()
+    guard let url = URL(string: "https://mermaid.live/") else { return }
+    NSWorkspace.shared.open(url)
   }
 }
