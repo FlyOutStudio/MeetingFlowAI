@@ -283,7 +283,7 @@ final class ClaudeServiceTests: XCTestCase {
     let state = AnalysisRetryTestState()
     URLProtocolStub.handler = { _ in
       state.recordRequest()
-      Self.response(
+      return Self.response(
         statusCode: 200,
         json: Self.completedResponseJSON(
           analysisText: "{\"summary\":\"placeholder\",\"todo\":[],\"flow\":[]}"
