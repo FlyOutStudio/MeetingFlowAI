@@ -73,6 +73,10 @@ final class MeetingViewModel: ObservableObject {
     }
   }
 
+  var canSaveMeetingTitle: Bool {
+    canSwitchMeeting && currentMeetingID != nil
+  }
+
   var canRetryAnalysis: Bool {
     phase == .transcriptReady
       && !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -138,6 +142,11 @@ final class MeetingViewModel: ObservableObject {
     presentedError = nil
     prepareNewMeeting(defaultTitle: "")
     phase = .idle
+  }
+
+  func saveMeetingTitle() {
+    guard canSaveMeetingTitle else { return }
+    persistCurrentMeeting()
   }
 
   func selectMeeting(id: UUID) {

@@ -175,9 +175,25 @@ private struct ControlPanelView: View {
       VStack(alignment: .leading, spacing: 8) {
         Text("会議タイトル")
           .font(.headline)
-        TextField("例：受注〜発送フロー改善会議", text: $viewModel.meetingTitle)
-          .textFieldStyle(.roundedBorder)
-          .disabled(!viewModel.canStartRecording)
+        HStack(spacing: 8) {
+          TextField("例：受注〜発送フロー改善会議", text: $viewModel.meetingTitle)
+            .textFieldStyle(.roundedBorder)
+            .disabled(!viewModel.canStartRecording)
+            .onSubmit {
+              viewModel.saveMeetingTitle()
+            }
+
+          Button("保存") {
+            viewModel.saveMeetingTitle()
+          }
+          .disabled(!viewModel.canSaveMeetingTitle)
+        }
+
+        if viewModel.canSaveMeetingTitle {
+          Text("変更後は保存を押すか、Enterキーで履歴へ反映します。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
 
       VStack(alignment: .leading, spacing: 8) {

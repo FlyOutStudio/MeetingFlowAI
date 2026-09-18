@@ -263,6 +263,42 @@ final class MeetingViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testSavingTitleUpdatesSelectedMeeting() async throws {
+    let recording = RecordingServiceStub()
+    let speech = SpeechServiceStub()
+    let analysisService = SequencedAnalysisService([.success(Self.analysis(summary: "タイトル変更"))])
+    let speechFactory = SpeechServiceFactoryStub([speech])
+    let historyStore = MeetingHistoryStoreStub()
+    let viewModel = makeViewModel(
+      recording: recording,
+      analysis: analysisService,
+      speechFactory: speechFactory,
+      historyStore: historyStore
+    )
+    viewModel.meetingTitle = "変更前のタイトル"
+
+    viewModel.startRecording()
+    try await waitUntil("録音状態へ遷移しませんでした。") {
+      viewModel.phase == .recording
+    }
+    await speech.emit(finalizedText: "タイトルを差し替える会議内容")
+    try await waitUntil("文字起こしが反映されませんでした。") {
+      viewModel.transcript == "タイトルを差し替える会議内容"
+    }
+
+    viewModel.stopRecording()
+    try await waitUntil("会議履歴が保存されませんでした。") {
+      viewModel.phase == .completed && viewModel.meetings.count == 1
+    }
+
+    viewModel.meetingTitle = "差し替え後のタイトル"
+    viewModel.saveMeetingTitle()
+
+    XCTAssertEqual(viewModel.meetingTitle, "差し替え後のタイトル")
+    XCTAssertEqual(viewModel.meetings.first?.title, "差し替え後のタイトル")
+  }
+
+  @MainActor
   private func makeViewModel(
     recording: any RecordingServicing,
     analysis: any MeetingAnalysisGenerating,
