@@ -68,6 +68,7 @@ final class ClaudeServiceTests: XCTestCase {
       XCTAssertTrue(system.contains("## 会議の目的・背景"))
       XCTAssertTrue(system.contains("次の対応"))
       XCTAssertTrue(system.contains("1項目ごとに改行"))
+      XCTAssertTrue(system.contains("placeholder"))
       XCTAssertTrue(system.contains("JSON以外は出力しない"))
 
       let outputConfig = try XCTUnwrap(json["output_config"] as? [String: Any])
@@ -275,6 +276,26 @@ final class ClaudeServiceTests: XCTestCase {
         try await service.analyze(title: "会議", transcript: "会議内容")
       },
       contains: "JSONを解析できません"
+    )
+  }
+
+  func testAnalyzePreservesMeaningfulContentError() async {
+    URLProtocolStub.handler = { _ in
+      Self.response(
+        statusCode: 200,
+        json: Self.completedResponseJSON(
+          analysisText: "{\"summary\":\"placeholder\",\"todo\":[],\"flow\":[]}"
+        )
+      )
+    }
+
+    let service = makeService()
+
+    await assertAppError(
+      from: {
+        try await service.analyze(title: "会議", transcript: "会議内容")
+      },
+      contains: "有効な内容がありません"
     )
   }
 
