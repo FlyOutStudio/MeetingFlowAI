@@ -67,6 +67,7 @@ final class ClaudeServiceTests: XCTestCase {
       XCTAssertTrue(system.contains("priorityをMedium"))
       XCTAssertTrue(system.contains("## 会議の目的・背景"))
       XCTAssertTrue(system.contains("次の対応"))
+      XCTAssertTrue(system.contains("1項目ごとに改行"))
       XCTAssertTrue(system.contains("JSON以外は出力しない"))
 
       let outputConfig = try XCTUnwrap(json["output_config"] as? [String: Any])

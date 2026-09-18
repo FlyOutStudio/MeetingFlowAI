@@ -72,15 +72,79 @@ private struct SummaryView: View {
 
   var body: some View {
     ScrollView {
-      Text(markdown)
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(18)
+      LazyVStack(alignment: .leading, spacing: 14) {
+        ForEach(sections) { section in
+          VStack(alignment: .leading, spacing: 8) {
+            Text(section.title)
+              .font(.headline)
+
+            Text(section.markdown)
+              .lineSpacing(5)
+              .textSelection(.enabled)
+              .frame(maxWidth: .infinity, alignment: .topLeading)
+          }
+          .padding(14)
+          .frame(maxWidth: .infinity, alignment: .topLeading)
+          .background(
+            Color(nsColor: .controlBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 10)
+          )
+          .overlay {
+            RoundedRectangle(cornerRadius: 10)
+              .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+          }
+        }
+      }
+      .padding(18)
     }
   }
 
-  private var markdown: AttributedString {
-    (try? AttributedString(markdown: summary)) ?? AttributedString(summary)
+  private var sections: [MinutesSection] {
+    MinutesSection.parse(summary)
+  }
+}
+
+private struct MinutesSection: Identifiable {
+  let id: String
+  let title: String
+  let body: String
+
+  var markdown: AttributedString {
+    (try? AttributedString(markdown: body)) ?? AttributedString(body)
+  }
+
+  static func parse(_ summary: String) -> [MinutesSection] {
+    var sections: [MinutesSection] = []
+    var title = "議事録"
+    var bodyLines: [String] = []
+
+    func appendCurrentSection() {
+      let body = bodyLines.joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !body.isEmpty else { return }
+      sections.append(
+        MinutesSection(
+          id: "\(sections.count)-\(title)",
+          title: title,
+          body: body
+        )
+      )
+    }
+
+    for line in summary.components(separatedBy: .newlines) {
+      if line.hasPrefix("## ") {
+        appendCurrentSection()
+        title = String(line.dropFirst(3))
+        bodyLines = []
+      } else {
+        bodyLines.append(line)
+      }
+    }
+    appendCurrentSection()
+
+    return sections.isEmpty
+      ? [MinutesSection(id: "empty", title: "議事録", body: summary)]
+      : sections
   }
 }
 
