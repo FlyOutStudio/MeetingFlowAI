@@ -19,6 +19,7 @@ final class MeetingViewModel: ObservableObject {
   private let speechServiceFactory: @Sendable () -> any SpeechServicing
   private let meetingHistoryStore: (any MeetingHistoryStoring)?
   private let audioFileSampleReader: AudioFileSampleReader
+  private let previousAnalysisStore: any PreviousAnalysisStoring
 
   private var speechService: (any SpeechServicing)?
   private var sampleTask: Task<Void, Never>?
@@ -36,6 +37,7 @@ final class MeetingViewModel: ObservableObject {
     analysisService: any MeetingAnalysisGenerating = ClaudeService(),
     exportService: ExportService = ExportService(),
     meetingHistoryStore: (any MeetingHistoryStoring)? = nil,
+    previousAnalysisStore: any PreviousAnalysisStoring = PreviousAnalysisStore(),
     audioFileSampleReader: AudioFileSampleReader = AudioFileSampleReader(),
     speechServiceFactory: @escaping @Sendable () -> any SpeechServicing = {
       SpeechServiceFactory.make()
@@ -45,6 +47,7 @@ final class MeetingViewModel: ObservableObject {
     self.analysisService = analysisService
     self.exportService = exportService
     self.meetingHistoryStore = meetingHistoryStore
+    self.previousAnalysisStore = previousAnalysisStore
     self.audioFileSampleReader = audioFileSampleReader
     self.speechServiceFactory = speechServiceFactory
 
@@ -84,6 +87,11 @@ final class MeetingViewModel: ObservableObject {
     default:
       false
     }
+  }
+
+  var canRestorePreviousAnalysis: Bool {
+    guard canSwitchMeeting, let currentMeetingID else { return false }
+    return previousAnalysisStore.hasSavedAnalysis(for: currentMeetingID)
   }
 
   var shouldShowAnalysisTabs: Bool {
@@ -204,6 +212,16 @@ final class MeetingViewModel: ObservableObject {
 
   func retryAnalysis() {
     guard canRetryAnalysis else { return }
+
+    if let analysis, analysis.hasMeaningfulContent, let currentMeetingID {
+      do {
+        try previousAnalysisStore.save(analysis, for: currentMeetingID)
+      } catch {
+        present(AppError.storage(error.localizedDescription))
+        return
+      }
+    }
+
     presentedError = nil
     phase = .generating
 
@@ -211,6 +229,20 @@ final class MeetingViewModel: ObservableObject {
     activeOperationID = operationID
     workflowTask = Task { [weak self] in
       await self?.generateAnalysis(operationID: operationID)
+    }
+  }
+
+  func restorePreviousAnalysis() {
+    guard let currentMeetingID, canRestorePreviousAnalysis else { return }
+
+    do {
+      guard let restored = try previousAnalysisStore.load(for: currentMeetingID) else { return }
+      analysis = restored
+      presentedError = nil
+      phase = .completed
+      persistCurrentMeeting()
+    } catch {
+      present(AppError.storage(error.localizedDescription))
     }
   }
 

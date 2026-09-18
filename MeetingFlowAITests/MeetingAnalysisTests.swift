@@ -223,6 +223,27 @@ final class MeetingAnalysisTests: XCTestCase {
     }
   }
 
+  func testAIDecoderRejectsPlaceholderOnlyAnalysis() throws {
+    let source = """
+      {
+        "summary": "placeholder",
+        "todo": [],
+        "flow": []
+      }
+      """
+
+    XCTAssertThrowsError(
+      try MeetingAnalysis.decodeAIOutput(
+        from: XCTUnwrap(source.data(using: .utf8))
+      )
+    ) { error in
+      XCTAssertEqual(
+        error as? AppError,
+        .invalidResponse("議事録・ToDo・業務フローに有効な内容がありませんでした。")
+      )
+    }
+  }
+
   func testAIDecoderTreatsMissingOrNullFieldsAsEmptyValues() throws {
     let source = """
       {

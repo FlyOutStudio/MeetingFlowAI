@@ -17,6 +17,7 @@ MeetingFlowAIは、対面会議やオンライン会議の音声をリアルタ�
 - 構造化フローを正本として生成するMermaid `flowchart TD`
 - Markdown（`.md`）、Mermaid（`.mmd`）、JSONの書き出し
 - SwiftDataによる文字起こし・解析結果のローカル自動保存と会議履歴
+- AI再生成の直前の解析結果を端末内へ退避し、ワンクリックで元に戻す機能
 - 過去の会議履歴の再表示、新しい会議への切り替え、履歴削除
 - 既存音声ファイルの読み込みと文字起こし・Claude解析
 - アプリ内設定からAnthropic APIキーをmacOS Keychainへ保存・更新・削除

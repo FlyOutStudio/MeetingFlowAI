@@ -124,10 +124,14 @@ final class MeetingViewModelTests: XCTestCase {
     let regenerated = Self.analysis(summary: "再生成後")
     let analysisService = SequencedAnalysisService([.success(first), .success(regenerated)])
     let speechFactory = SpeechServiceFactoryStub([speech])
+    let historyStore = MeetingHistoryStoreStub()
+    let previousAnalysisStore = PreviousAnalysisStoreStub()
     let viewModel = makeViewModel(
       recording: recording,
       analysis: analysisService,
-      speechFactory: speechFactory
+      speechFactory: speechFactory,
+      historyStore: historyStore,
+      previousAnalysisStore: previousAnalysisStore
     )
 
     viewModel.startRecording()
@@ -154,6 +158,10 @@ final class MeetingViewModelTests: XCTestCase {
 
     let analysisCalls = await analysisService.numberOfCalls()
     XCTAssertEqual(analysisCalls, 2)
+    XCTAssertTrue(viewModel.canRestorePreviousAnalysis)
+
+    viewModel.restorePreviousAnalysis()
+    XCTAssertEqual(viewModel.analysis, first)
   }
 
   @MainActor
@@ -343,12 +351,14 @@ final class MeetingViewModelTests: XCTestCase {
     recording: any RecordingServicing,
     analysis: any MeetingAnalysisGenerating,
     speechFactory: SpeechServiceFactoryStub,
-    historyStore: (any MeetingHistoryStoring)? = nil
+    historyStore: (any MeetingHistoryStoring)? = nil,
+    previousAnalysisStore: any PreviousAnalysisStoring = PreviousAnalysisStoreStub()
   ) -> MeetingViewModel {
     MeetingViewModel(
       recordingService: recording,
       analysisService: analysis,
       meetingHistoryStore: historyStore,
+      previousAnalysisStore: previousAnalysisStore,
       speechServiceFactory: { speechFactory.make() }
     )
   }
@@ -439,6 +449,23 @@ private final class MeetingHistoryStoreStub: MeetingHistoryStoring {
 
   func delete(id: UUID) throws {
     records.removeAll { $0.id == id }
+  }
+}
+
+@MainActor
+private final class PreviousAnalysisStoreStub: PreviousAnalysisStoring {
+  private var analyses: [UUID: MeetingAnalysis] = [:]
+
+  func save(_ analysis: MeetingAnalysis, for meetingID: UUID) throws {
+    analyses[meetingID] = analysis
+  }
+
+  func load(for meetingID: UUID) throws -> MeetingAnalysis? {
+    analyses[meetingID]
+  }
+
+  func hasSavedAnalysis(for meetingID: UUID) -> Bool {
+    analyses[meetingID] != nil
   }
 }
 

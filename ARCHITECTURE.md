@@ -21,6 +21,8 @@ flowchart LR
   Claude --> API["Claude Messages API\nclaude-sonnet-5"]
   API --> Analysis["MeetingAnalysis\nsummary / todo / flow"]
   Analysis --> Store
+  Analysis --> PreviousAnalysis["再生成前の解析バックアップ\nApplication Support"]
+  PreviousAnalysis --> UI
   Store --> UI
   Analysis --> Mermaid["MermaidGenerator"]
   Analysis --> Export["Markdown / Mermaid / JSON"]
@@ -43,6 +45,7 @@ flowchart LR
 - 旧OpenAIキーとAnthropicキーを混同しないよう、Keychain accountを`ANTHROPIC_API_KEY`へ変更しています。
 - エラー本文には会議内容が含まれる可能性があるため、画面やログへそのまま出しません。
 - SwiftDataにはタイトル、文字起こし、構造化解析結果、作成・更新日時だけを保存します。録音音声と読み込み元音声は保存しません。
+- AIを再生成する直前の有効な解析は、SwiftDataを上書きする前にApplication Supportへ退避します。直近の結果だけを「再生成前の結果に戻す」で復元できます。
 - 初期スキーマを`MeetingSchemaV1`として版管理し、将来の項目変更ではMigrationStageを追加して履歴を引き継ぎます。
 - 保存処理は`MeetingHistoryStoring`境界で分離し、ViewModelの単体テストではインメモリ実装へ差し替えます。
 

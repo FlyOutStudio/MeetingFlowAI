@@ -129,14 +129,34 @@ extension MeetingAnalysis {
   /// に限って非致命的な揺れを正規化します。ExportやSwiftDataからの復元は
   /// 通常の`JSONDecoder`を使うため、保存データの契約は緩めません。
   static func decodeAIOutput(from data: Data) throws -> MeetingAnalysis {
+    let analysis: MeetingAnalysis
     do {
-      return try JSONDecoder()
-        .decode(MeetingAnalysis.self, from: data)
-        .withRequiredMinutesSections()
+      analysis = try JSONDecoder().decode(MeetingAnalysis.self, from: data)
     } catch {
       let payload = try JSONDecoder().decode(AIMeetingAnalysisPayload.self, from: data)
-      return payload.normalized().withRequiredMinutesSections()
+      analysis = payload.normalized()
     }
+
+    guard analysis.hasMeaningfulContent else {
+      throw AppError.invalidResponse("議事録・ToDo・業務フローに有効な内容がありませんでした。")
+    }
+
+    return analysis.withRequiredMinutesSections()
+  }
+
+  var hasMeaningfulContent: Bool {
+    guard todo.isEmpty, flow.isEmpty else { return true }
+
+    let placeholder = "会議内で明確になりませんでした。"
+    return summary
+      .components(separatedBy: .newlines)
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .contains { line in
+        !line.isEmpty
+          && !line.hasPrefix("#")
+          && line != "- \(placeholder)"
+          && line.lowercased() != "placeholder"
+      }
   }
 
   /// AI出力だけは、議事録タブで必要な見出しを常に表示する。

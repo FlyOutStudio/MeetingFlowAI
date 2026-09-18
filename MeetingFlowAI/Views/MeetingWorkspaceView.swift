@@ -296,6 +296,18 @@ private struct ControlPanelView: View {
         }
       }
 
+      if viewModel.canRestorePreviousAnalysis {
+        Button {
+          viewModel.restorePreviousAnalysis()
+        } label: {
+          Label("再生成前の結果に戻す", systemImage: "arrow.uturn.backward")
+        }
+
+        Text("再生成前に自動保存した議事録・ToDo・業務フローへ戻します。")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
       if viewModel.analysis != nil {
         Menu {
           ForEach(ExportFormat.allCases) { format in
