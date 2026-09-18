@@ -1,5 +1,12 @@
 # 変更履歴
 
+## 1.4.1 - 2026-09-19
+
+### Changed
+
+- Mermaidタブの外部編集先をMermaid Live Editorからdraw.io Web版へ変更
+- Mermaidコードを自動コピーしてdraw.ioの編集画面を開く導線へ変更
+
 ## 1.4.0 - 2026-09-19
 
 ### Added

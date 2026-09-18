@@ -285,9 +285,9 @@ private struct MermaidSourceView: View {
         .disabled(viewModel.analysis == nil)
 
         Button {
-          openMermaidLiveEditor()
+          openDrawioEditor()
         } label: {
-          Label("Mermaid Liveで編集", systemImage: "arrow.up.right.square")
+          Label("draw.ioで編集", systemImage: "arrow.up.right.square")
         }
         .disabled(viewModel.analysis == nil)
 
@@ -312,7 +312,7 @@ private struct MermaidSourceView: View {
           .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
       }
 
-      Text("MermaidコードをコピーしてMermaid Live Editorを開きます。貼り付け後に図を編集・書き出しできます。")
+      Text("Mermaidコードをコピーしてdraw.io Web版を開きます。貼り付け後に編集・書き出しできます。")
         .font(.caption)
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -327,9 +327,9 @@ private struct MermaidSourceView: View {
     pasteboard.setString(mermaid, forType: .string)
   }
 
-  private func openMermaidLiveEditor() {
+  private func openDrawioEditor() {
     copyMermaid()
-    guard let url = URL(string: "https://mermaid.live/") else { return }
+    guard let url = URL(string: "https://app.diagrams.net/") else { return }
     NSWorkspace.shared.open(url)
   }
 }
