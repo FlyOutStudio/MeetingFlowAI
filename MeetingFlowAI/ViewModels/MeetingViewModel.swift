@@ -76,21 +76,26 @@ final class MeetingViewModel: ObservableObject {
     }
   }
 
+  var currentAnalysisLoadError: String? {
+    meetings.first(where: { $0.id == currentMeetingID })?.analysisLoadError
+  }
+
   var canSaveMeetingTitle: Bool {
-    canSwitchMeeting && currentMeetingID != nil
+    canSwitchMeeting && currentMeetingID != nil && currentAnalysisLoadError == nil
   }
 
   var canRetryAnalysis: Bool {
+    guard currentAnalysisLoadError == nil else { return false }
     switch phase {
     case .transcriptReady, .completed:
-      !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      return !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     default:
-      false
+      return false
     }
   }
 
   var canRestorePreviousAnalysis: Bool {
-    guard canSwitchMeeting, let currentMeetingID else { return false }
+    guard canSwitchMeeting, currentAnalysisLoadError == nil, let currentMeetingID else { return false }
     return previousAnalysisStore.hasSavedAnalysis(for: currentMeetingID)
   }
 
@@ -237,10 +242,9 @@ final class MeetingViewModel: ObservableObject {
 
     do {
       guard let restored = try previousAnalysisStore.load(for: currentMeetingID) else { return }
-      analysis = restored
-      presentedError = nil
-      phase = .completed
-      persistCurrentMeeting()
+      if commitInterviewAnalysis(restored) {
+        phase = .completed
+      }
     } catch {
       present(AppError.storage(error.localizedDescription))
     }
@@ -278,6 +282,66 @@ final class MeetingViewModel: ObservableObject {
         self.present(error)
       }
     }
+  }
+
+  @discardableResult
+  func editInterviewItem(id: UUID, content: InterviewContent,
+                         origin: InterviewOrigin, quotes: [String]) -> Bool {
+    guard canSwitchMeeting, var current = analysis,
+      var interview = current.businessInterview,
+      let index = interview.items.firstIndex(where: { $0.id == id }) else { return false }
+    do {
+      try interview.items[index].edit(content: content, origin: origin,
+        quotes: quotes, transcript: interview.sourceTranscript)
+      current.businessInterview = interview
+      return commitInterviewAnalysis(current)
+    } catch {
+      present(error)
+      return false
+    }
+  }
+
+  func confirmInterviewItem(id: UUID) {
+    guard canSwitchMeeting, var current = analysis,
+      var interview = current.businessInterview,
+      let index = interview.items.firstIndex(where: { $0.id == id }) else { return }
+    do {
+      try interview.items[index].confirm(in: interview.sourceTranscript)
+      current.businessInterview = interview
+      commitInterviewAnalysis(current)
+    } catch { present(error) }
+  }
+
+  /// The UI requires explicit confirmation before replacing human work.
+  func acceptInterviewCandidate() {
+    guard canSwitchMeeting, var current = analysis,
+      let candidate = current.interviewCandidate else { return }
+    // Preserve the latest edits too, including edits made after regeneration.
+    if let currentMeetingID {
+      do { try previousAnalysisStore.save(current, for: currentMeetingID) }
+      catch { present(AppError.storage(error.localizedDescription)); return }
+    }
+    current.businessInterview = candidate
+    current.interviewCandidate = nil
+    commitInterviewAnalysis(current)
+  }
+
+  func dismissInterviewCandidate() {
+    guard canSwitchMeeting, var current = analysis else { return }
+    current.interviewCandidate = nil
+    commitInterviewAnalysis(current)
+  }
+
+  @discardableResult
+  private func commitInterviewAnalysis(_ updated: MeetingAnalysis) -> Bool {
+    let previous = analysis
+    presentedError = nil
+    analysis = updated
+    guard persistCurrentMeeting() else {
+      analysis = previous
+      return false
+    }
+    return true
   }
 
   func dismissError() {
@@ -407,7 +471,14 @@ final class MeetingViewModel: ObservableObject {
         transcript: transcript
       )
       try ensureCurrent(operationID)
-      analysis = generated
+      var accepted = generated
+      accepted.businessInterview = try generated.businessInterview?.asAIResult(transcript: transcript)
+      accepted.interviewCandidate = nil
+      if let previous = analysis?.businessInterview, previous.hasHumanWork {
+        accepted.interviewCandidate = accepted.businessInterview
+        accepted.businessInterview = previous
+      }
+      analysis = accepted
       activeOperationID = nil
       phase = .completed
       persistCurrentMeeting()
@@ -498,8 +569,13 @@ final class MeetingViewModel: ObservableObject {
     analysis = nil
   }
 
-  private func persistCurrentMeeting() {
-    guard let meetingHistoryStore else { return }
+  @discardableResult
+  private func persistCurrentMeeting() -> Bool {
+    guard let meetingHistoryStore else { return true }
+    guard currentAnalysisLoadError == nil else {
+      present(AppError.storage("読み込めない解析結果があるため、この会議は上書きできません。"))
+      return false
+    }
 
     let now = Date()
     let id = currentMeetingID ?? UUID()
@@ -524,8 +600,10 @@ final class MeetingViewModel: ObservableObject {
       selectedMeetingID = id
       meetingTitle = title
       reloadMeetings(selectMostRecent: false)
+      return true
     } catch {
       present(AppError.storage(error.localizedDescription))
+      return false
     }
   }
 

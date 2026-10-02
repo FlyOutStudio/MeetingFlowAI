@@ -44,7 +44,7 @@ struct ClaudeJSONSchemaFormat: Encodable {
 struct MeetingAnalysisJSONSchema: Encodable {
   let type = "object"
   let properties = MeetingAnalysisPropertiesSchema()
-  let required = ["summary", "todo", "flow"]
+  let required = ["summary", "todo", "flow", "businessInterview"]
   let additionalProperties = false
 }
 
@@ -54,6 +54,7 @@ struct MeetingAnalysisPropertiesSchema: Encodable {
   )
   let todo = ArrayJSONSchema(items: TodoItemJSONSchema())
   let flow = ArrayJSONSchema(items: FlowStepJSONSchema())
+  let businessInterview = InterviewJSONSchema()
 }
 
 struct TodoItemJSONSchema: Encodable {
@@ -147,4 +148,43 @@ struct ClaudeAPIResponse: Decodable {
 struct ClaudeContentBlock: Decodable {
   let type: String
   let text: String?
+}
+
+struct InterviewJSONSchema: Encodable {
+  let type = "object"
+  let properties = Properties()
+  let required = ["items"]
+  let additionalProperties = false
+  struct Properties: Encodable {
+    let items = ArrayJSONSchema(items: InterviewItemJSONSchema())
+  }
+}
+
+struct InterviewItemJSONSchema: Encodable {
+  let type = "object"
+  let properties = Properties()
+  let required = ["section", "content", "origin", "quotes"]
+  let additionalProperties = false
+  struct Properties: Encodable {
+    let section = StringJSONSchema(allowedValues: ["currentProcess", "problem", "requirement", "question"])
+    let content = InterviewContentJSONSchema()
+    let origin = StringJSONSchema(allowedValues: ["agreed", "proposed", "aiSuggestion"])
+    let quotes = ArrayJSONSchema(items: StringJSONSchema(description: "原文に完全一致する、一箇所に特定できる抜粋。空配列不可。"))
+  }
+}
+
+struct InterviewContentJSONSchema: Encodable {
+  let type = "object"
+  let properties = Properties()
+  let required = ["text", "actor", "action", "input", "tools", "output", "exceptions"]
+  let additionalProperties = false
+  struct Properties: Encodable {
+    let text = StringJSONSchema()
+    let actor = StringJSONSchema()
+    let action = StringJSONSchema()
+    let input = StringJSONSchema()
+    let tools = StringJSONSchema()
+    let output = StringJSONSchema()
+    let exceptions = StringJSONSchema()
+  }
 }

@@ -24,17 +24,25 @@ final class MeetingHistoryStore: MeetingHistoryStoring {
     )
 
     return try modelContext.fetch(descriptor).map { stored in
-      MeetingRecord(
+      let analysis: MeetingAnalysis?
+      let analysisLoadError: String?
+      do {
+        analysis = try stored.analysisJSON.map { try decoder.decode(MeetingAnalysis.self, from: $0) }
+        analysisLoadError = nil
+      } catch {
+        analysis = nil
+        analysisLoadError = "保存済みの解析結果を読み込めません。原文と保存データを保護するため、この会議は読み取り専用です。"
+      }
+      return MeetingRecord(
         id: stored.id,
         title: stored.title,
         transcript: stored.transcript,
-        analysis: stored.analysisJSON.flatMap {
-          try? decoder.decode(MeetingAnalysis.self, from: $0)
-        },
+        analysis: analysis,
         captureMode: stored.captureModeRawValue.flatMap(MeetingCaptureMode.init),
         source: MeetingSource(rawValue: stored.sourceRawValue) ?? .recording,
         createdAt: stored.createdAt,
-        updatedAt: stored.updatedAt
+        updatedAt: stored.updatedAt,
+        analysisLoadError: analysisLoadError
       )
     }
   }
@@ -44,6 +52,12 @@ final class MeetingHistoryStore: MeetingHistoryStoring {
     let analysisJSON = try record.analysis.map { try encoder.encode($0) }
 
     if let stored = storedMeetings.first(where: { $0.id == record.id }) {
+      // A failed read must never be converted to a successful write of nil.
+      // Preserve the original bytes for recovery, even for non-UI callers.
+      if let data = stored.analysisJSON {
+        do { _ = try decoder.decode(MeetingAnalysis.self, from: data) }
+        catch { throw AppError.storage("読み込めない解析結果があるため、この会議は上書きできません。") }
+      }
       stored.title = record.title
       stored.transcript = record.transcript
       stored.analysisJSON = analysisJSON
@@ -65,7 +79,12 @@ final class MeetingHistoryStore: MeetingHistoryStoring {
       )
     }
 
-    try modelContext.save()
+    do {
+      try modelContext.save()
+    } catch {
+      modelContext.rollback()
+      throw error
+    }
   }
 
   func delete(id: UUID) throws {
