@@ -11,6 +11,14 @@ tests, and updates README, ARCHITECTURE, OPERATIONS, TODO and CHANGELOG.
 SETUP is unchanged because no new tools, credentials or environment are required.
 No real analysis API call or recording upload is used for release verification.
 
+Release-preparation Actions run 36996403402 passed all unit tests and the
+Universal build for e84902a. The downloaded build was launched on this Mac with
+an isolated ReleaseCheck bundle identifier and synthetic data (not user meetings).
+The four sections, highlighted original quotations, item editing, explicit human
+confirmation and persistence after quit/relaunch were verified. A legacy JSON
+meeting retained its minutes and showed the expected pre-regeneration message.
+The production bundle identifier and SwiftData schema remain unchanged.
+
 ## Scope and baseline
 
 Implemented on `codex/business-interview-mvp`, based on
