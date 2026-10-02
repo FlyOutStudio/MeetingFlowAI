@@ -1,5 +1,22 @@
 # 変更履歴
 
+## 1.5.2 - 2026-10-02
+
+### Fixed
+
+- 長時間会議のClaude応答をストリーミングで受信し、完成まで通信が無応答になる方式を変更
+- 無応答の待ち時間を120秒から300秒、1要求全体の上限を900秒に設定。原文を分割・切り捨てせず全文を解析
+- 完了イベントと停止理由を確認してからJSONを解析し、受信途中の断片・中断・通信エラーでは既存結果を保持。タイムアウトや中断の自動再送はしない
+- 受信待ちでも通信タスクをキャンセルできるようにし、処理中の案内とタイムアウト時の文言を改善
+
+### 変更対象と設計
+
+- `ClaudeService.swift`: 専用URLSession、待ち時間設定、SSEの集約、キャンセルと完了判定。タイムアウト対策は[Claude公式のストリーミング仕様](https://platform.claude.com/docs/en/build-with-claude/streaming)に基づき、未完成の結果を保存しない
+- `ClaudeAPIModels.swift`: `stream: true`を送信。結果のJSON Schemaと保存形式は変更なし
+- `MeetingWorkspaceView.swift`: 長い会議の解析中の案内。途中結果は表示しない
+- `ClaudeServiceTests.swift`・`MeetingViewModelTests.swift`: UTF-8分断、複数行SSE・ping・未知イベント、完了欠落、停止理由、APIエラー、タイムアウト、キャンセル、長文と既存結果保持を検証
+- `project.pbxproj`: 1.5.2／ビルド21。`README.md`・`OPERATIONS.md`・`ARCHITECTURE.md`・`TODO.md`は通信方針と確認範囲を更新。環境構築の変更はないため`SETUP.md`は据え置き
+
 ## 1.5.1 - 2026-10-02
 
 ### Fixed

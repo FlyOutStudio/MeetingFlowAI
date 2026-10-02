@@ -165,6 +165,33 @@ final class MeetingViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testLongTranscriptAndPreviousResultSurviveAnalysisTimeout() async throws {
+    let history = MeetingHistoryStoreStub()
+    let backup = PreviousAnalysisStoreStub()
+    let id = UUID()
+    let transcript = (1...700).map { "議題\($0): 営業が申込書を受け取り台帳へ入力する手順を見直します。二重入力が課題で、通知方法は次回確認します。" }.joined(separator: "\n")
+    let original = Self.analysis(summary: "二重入力を減らす運用を検討した。")
+    try history.upsert(MeetingRecord(id: id, title: "長時間会議", transcript: transcript,
+      analysis: original, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date()))
+    let service = SequencedAnalysisService([.failure(.aiAnalysis("Claude APIの応答が時間内に完了しませんでした。"))])
+    let vm = makeViewModel(recording: RecordingServiceStub(), analysis: service,
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history, previousAnalysisStore: backup)
+    vm.retryAnalysis()
+    try await waitUntil("タイムアウト後に再試行可能になりませんでした。") {
+      vm.phase == .transcriptReady && vm.presentedError != nil
+    }
+    XCTAssertGreaterThan(transcript.count, 40_000)
+    XCTAssertEqual(vm.transcript, transcript)
+    XCTAssertEqual(vm.analysis, original)
+    XCTAssertEqual(try history.fetchAll().first?.transcript, transcript)
+    XCTAssertEqual(try history.fetchAll().first?.analysis, original)
+    XCTAssertEqual(try backup.load(for: id), original)
+    XCTAssertTrue(vm.canRetryAnalysis)
+    let calls = await service.numberOfCalls()
+    XCTAssertEqual(calls, 1)
+  }
+
+  @MainActor
   func testRetryFromStoredPlaceholderDoesNotOverwriteRecoverableBackup() async throws {
     let history = MeetingHistoryStoreStub()
     let backup = PreviousAnalysisStoreStub()
