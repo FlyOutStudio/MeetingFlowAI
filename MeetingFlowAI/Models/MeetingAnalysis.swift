@@ -9,16 +9,22 @@ struct MeetingAnalysis: Codable, Equatable, Sendable {
   let summary: String
   let todo: [TodoItem]
   let flow: [FlowStep]
+  var businessInterview: BusinessInterview?
+  var interviewCandidate: BusinessInterview?
   var mermaid: String { MermaidGenerator.render(flow: flow) }
 
   init(
     summary: String,
     todo: [TodoItem],
-    flow: [FlowStep]
+    flow: [FlowStep],
+    businessInterview: BusinessInterview? = nil,
+    interviewCandidate: BusinessInterview? = nil
   ) {
     self.summary = summary
     self.todo = todo
     self.flow = flow
+    self.businessInterview = businessInterview
+    self.interviewCandidate = interviewCandidate
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -26,6 +32,8 @@ struct MeetingAnalysis: Codable, Equatable, Sendable {
     case todo
     case flow
     case mermaid
+    case businessInterview
+    case interviewCandidate
   }
 
   init(from decoder: any Decoder) throws {
@@ -36,9 +44,14 @@ struct MeetingAnalysis: Codable, Equatable, Sendable {
 
     try Self.validate(todo: todo, flow: flow, codingPath: decoder.codingPath)
 
-    // Responses APIはsummary/todo/flowだけを返します。Export JSONにmermaidが
-    // 含まれていても読み捨て、常にflowから計算することで正本を一つに保ちます。
-    self.init(summary: summary, todo: todo, flow: flow)
+    // Export JSONのmermaidは読み捨て、常にflowから計算します。
+    // 旧履歴には業務ヒアリングがないため、追加項目は任意で復元します。
+    let interview = try container.decodeIfPresent(BusinessInterview.self, forKey: .businessInterview)
+    let candidate = try container.decodeIfPresent(BusinessInterview.self, forKey: .interviewCandidate)
+    try interview?.validate()
+    try candidate?.validate()
+    self.init(summary: summary, todo: todo, flow: flow,
+      businessInterview: interview, interviewCandidate: candidate)
   }
 
   func encode(to encoder: any Encoder) throws {
@@ -47,6 +60,8 @@ struct MeetingAnalysis: Codable, Equatable, Sendable {
     try container.encode(todo, forKey: .todo)
     try container.encode(flow, forKey: .flow)
     try container.encode(mermaid, forKey: .mermaid)
+    try container.encodeIfPresent(businessInterview, forKey: .businessInterview)
+    try container.encodeIfPresent(interviewCandidate, forKey: .interviewCandidate)
   }
 
   /// Mermaid・Miro・BPMNなど全出力の正本になるため、参照の不整合を
@@ -128,12 +143,27 @@ extension MeetingAnalysis {
   /// 空文字列の禁止までは表現できません。まず通常の厳密decodeを試し、AI応答
   /// に限って非致命的な揺れを正規化します。ExportやSwiftDataからの復元は
   /// 通常の`JSONDecoder`を使うため、保存データの契約は緩めません。
-  static func decodeAIOutput(from data: Data) throws -> MeetingAnalysis {
-    let analysis: MeetingAnalysis
+  static func decodeAIOutput(from data: Data, transcript: String? = nil) throws -> MeetingAnalysis {
+    var legacyData = data
+    var interview: BusinessInterview?
+    if var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+      if let payload = object.removeValue(forKey: "businessInterview") {
+        guard let transcript else { throw InterviewEvidence.invalidEvidence }
+        let payloadData = try JSONSerialization.data(withJSONObject: payload, options: [.fragmentsAllowed])
+        interview = try JSONDecoder().decode(AIInterviewPayload.self, from: payloadData)
+          .validated(transcript: transcript)
+      }
+      if transcript != nil, interview == nil {
+        throw AppError.invalidResponse("AIの解析結果に業務ヒアリングがありませんでした。もう一度お試しください。")
+      }
+      object.removeValue(forKey: "interviewCandidate")
+      legacyData = try JSONSerialization.data(withJSONObject: object)
+    }
+    var analysis: MeetingAnalysis
     do {
-      analysis = try JSONDecoder().decode(MeetingAnalysis.self, from: data)
+      analysis = try JSONDecoder().decode(MeetingAnalysis.self, from: legacyData)
     } catch {
-      let payload = try JSONDecoder().decode(AIMeetingAnalysisPayload.self, from: data)
+      let payload = try JSONDecoder().decode(AIMeetingAnalysisPayload.self, from: legacyData)
       analysis = payload.normalized()
     }
 
@@ -141,6 +171,7 @@ extension MeetingAnalysis {
       throw AppError.invalidResponse("議事録・ToDo・業務フローに有効な内容がありませんでした。")
     }
 
+    analysis.businessInterview = interview
     return analysis.withRequiredMinutesSections()
   }
 
@@ -165,7 +196,9 @@ extension MeetingAnalysis {
     MeetingAnalysis(
       summary: MinutesSummaryFormatter.normalized(summary),
       todo: todo,
-      flow: flow
+      flow: flow,
+      businessInterview: businessInterview,
+      interviewCandidate: interviewCandidate
     )
   }
 }

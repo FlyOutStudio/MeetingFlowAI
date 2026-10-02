@@ -98,6 +98,10 @@ private struct MeetingHistorySidebar: View {
               Text(meeting.title)
                 .font(.callout.weight(.semibold))
                 .lineLimit(2)
+              if meeting.analysisLoadError != nil {
+                Label("解析結果の読み込みエラー", systemImage: "exclamationmark.triangle")
+                  .font(.caption).foregroundStyle(.orange)
+              }
               Text(meeting.updatedAt.formatted(date: .abbreviated, time: .shortened))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -162,6 +166,7 @@ private struct MeetingHistorySidebar: View {
 private struct ControlPanelView: View {
   @ObservedObject var viewModel: MeetingViewModel
   @State private var isAudioImporterPresented = false
+  @State private var showingRestoreConfirmation = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -290,7 +295,7 @@ private struct ControlPanelView: View {
         }
 
         if viewModel.analysis != nil {
-          Text("議事録・ToDo・業務フローを最新のAI結果で置き換えます。")
+          Text("議事録・ToDo・業務フローを再生成します。編集・確認した業務ヒアリングは保持し、新しい結果を候補として表示します。")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
@@ -298,12 +303,16 @@ private struct ControlPanelView: View {
 
       if viewModel.canRestorePreviousAnalysis {
         Button {
-          viewModel.restorePreviousAnalysis()
+          if viewModel.analysis?.businessInterview?.hasHumanWork == true {
+            showingRestoreConfirmation = true
+          } else {
+            viewModel.restorePreviousAnalysis()
+          }
         } label: {
           Label("再生成前の結果に戻す", systemImage: "arrow.uturn.backward")
         }
 
-        Text("再生成前に自動保存した議事録・ToDo・業務フローへ戻します。")
+        Text("自動保存した解析結果へ戻します。業務ヒアリングの編集内容と確認状態も復元します。")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -337,6 +346,12 @@ private struct ControlPanelView: View {
     }
     .padding(22)
     .background(Color(nsColor: .controlBackgroundColor))
+    .alert("保存した解析結果へ戻しますか？", isPresented: $showingRestoreConfirmation) {
+      Button("戻す", role: .destructive) { viewModel.restorePreviousAnalysis() }
+      Button("キャンセル", role: .cancel) {}
+    } message: {
+      Text("現在の業務ヒアリングには人が編集・確認した内容があります。退避後の変更は失われ、議事録と候補を含む解析全体が退避時の内容に戻ります。残したい内容は先にJSONで書き出してください。")
+    }
     .fileImporter(
       isPresented: $isAudioImporterPresented,
       allowedContentTypes: [.audio],

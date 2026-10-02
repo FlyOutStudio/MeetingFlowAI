@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 private enum AnalysisTab: Hashable {
+  case interview
   case summary
   case todo
   case workflow
@@ -14,6 +15,12 @@ struct AnalysisTabsView: View {
 
   var body: some View {
     TabView(selection: $selectedTab) {
+      tabContent {
+        BusinessInterviewView(viewModel: viewModel)
+      }
+      .tabItem { Label("業務ヒアリング", systemImage: "list.bullet.clipboard") }
+      .tag(AnalysisTab.interview)
+
       tabContent {
         SummaryView(summary: viewModel.analysis?.summary ?? "")
       }
@@ -48,7 +55,9 @@ struct AnalysisTabsView: View {
   private func tabContent<Content: View>(
     @ViewBuilder content: () -> Content
   ) -> some View {
-    if viewModel.analysis != nil {
+    if let error = viewModel.currentAnalysisLoadError {
+      ContentUnavailableView("解析結果を読み込めません", systemImage: "exclamationmark.triangle", description: Text(error))
+    } else if viewModel.analysis != nil {
       content()
     } else if viewModel.phase == .transcriptReady {
       ContentUnavailableView(

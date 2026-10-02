@@ -124,7 +124,45 @@ struct ExportService: Sendable {
       "",
     ])
 
+    if let interview = analysis.businessInterview {
+      lines.append(interviewMarkdown(interview, heading: "業務ヒアリング", prefix: "interview"))
+    }
+    if let candidate = analysis.interviewCandidate {
+      lines.append(interviewMarkdown(candidate, heading: "再解析の候補（未採用）", prefix: "candidate"))
+    }
     return lines.joined(separator: "\n")
+  }
+
+  private static func interviewMarkdown(_ interview: BusinessInterview, heading: String, prefix: String) -> String {
+    var lines = ["", "## \(heading)", "", "出所と人の確認状態は別管理です。話者・時刻は記録されていません。", ""]
+    for section in InterviewSection.allCases {
+      lines += ["### \(section.title)", ""]
+      let items = interview.items.filter { $0.section == section }
+      if items.isEmpty { lines += ["該当する内容は抽出されていません。未確認です。", ""] }
+      for item in items {
+        lines += ["出所：\(item.origin.title) / 人の確認：\(item.review.title) / 人が編集：\(item.humanEdited ? "はい" : "いいえ")", literalBlock(item.content.text)]
+        if section == .currentProcess {
+          for (label, value) in [("担当者", item.content.actor), ("作業", item.content.action),
+            ("入力", item.content.input), ("道具", item.content.tools),
+            ("出力", item.content.output), ("例外", item.content.exceptions)] {
+            lines += ["\(label)", literalBlock(value)]
+          }
+        }
+        for (index, reference) in item.evidence.enumerated() {
+          let anchor = "\(prefix)-\(item.id.uuidString)-\(index)"
+          lines += ["[根拠原文](#\(anchor))", "<a id=\"\(anchor)\"></a>",
+            "保存原文のUTF-16位置 \(reference.startUTF16)、長さ \(reference.lengthUTF16)", literalBlock(reference.quote)]
+        }
+      }
+    }
+    lines += ["### 解析時に保存した原文", literalBlock(interview.sourceTranscript)]
+    return lines.joined(separator: "\n\n")
+  }
+
+  private static func literalBlock(_ text: String) -> String {
+    let longestRun = text.split(whereSeparator: { $0 != "`" }).map(\.count).max() ?? 0
+    let fence = String(repeating: "`", count: max(3, longestRun + 1))
+    return "\(fence)text\n\(text)\n\(fence)"
   }
 
   static func mermaidContent(for analysis: MeetingAnalysis) -> String {

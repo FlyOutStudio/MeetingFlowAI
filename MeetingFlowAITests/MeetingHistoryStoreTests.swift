@@ -6,6 +6,50 @@ import XCTest
 
 final class MeetingHistoryStoreTests: XCTestCase {
   @MainActor
+  func testInterviewRoundTripAcrossContexts() throws {
+    let schema = Schema(versionedSchema: MeetingSchemaV1.self)
+    let configuration = ModelConfiguration("InterviewHistoryTests", schema: schema, isStoredInMemoryOnly: true)
+    let container = try ModelContainer(for: schema, migrationPlan: MeetingDataMigrationPlan.self, configurations: [configuration])
+    var analysis = try InterviewFixture.analysis()
+    try analysis.businessInterview?.items[0].confirm(in: InterviewFixture.transcript)
+    analysis.interviewCandidate = try InterviewFixture.interview()
+    let record = MeetingRecord(id: UUID(), title: "保存", transcript: InterviewFixture.transcript,
+      analysis: analysis, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date())
+    try MeetingHistoryStore(modelContext: ModelContext(container)).upsert(record)
+    let restored = try MeetingHistoryStore(modelContext: ModelContext(container)).fetchAll()
+    XCTAssertEqual(restored, [record])
+  }
+
+  @MainActor
+  func testCorruptInterviewIsIsolatedAndRawBytesAreProtected() throws {
+    let schema = Schema(versionedSchema: MeetingSchemaV1.self)
+    let configuration = ModelConfiguration("CorruptInterviewTests", schema: schema, isStoredInMemoryOnly: true)
+    let container = try ModelContainer(for: schema, migrationPlan: MeetingDataMigrationPlan.self, configurations: [configuration])
+    let context = ModelContext(container)
+    let corruptData = Data(#"{"summary":"要約","todo":[],"flow":[],"businessInterview":{"items":[]}}"#.utf8)
+    let id = UUID()
+    context.insert(StoredMeeting(id: id, title: "破損テスト", transcript: InterviewFixture.transcript,
+      analysisJSON: corruptData, captureModeRawValue: nil,
+      sourceRawValue: MeetingSource.importedAudio.rawValue, createdAt: Date(), updatedAt: Date()))
+    try context.save()
+    let store = MeetingHistoryStore(modelContext: context)
+    let healthy = MeetingRecord(id: UUID(), title: "正常", transcript: InterviewFixture.transcript,
+      analysis: try InterviewFixture.analysis(), captureMode: nil, source: .importedAudio,
+      createdAt: Date(), updatedAt: Date())
+    try store.upsert(healthy)
+    let records = try store.fetchAll()
+    XCTAssertEqual(records.count, 2)
+    XCTAssertEqual(records.first(where: { $0.id == healthy.id }), healthy)
+    let corrupt = try XCTUnwrap(records.first(where: { $0.id == id }))
+    XCTAssertNil(corrupt.analysis)
+    XCTAssertNotNil(corrupt.analysisLoadError)
+    XCTAssertEqual(corrupt.transcript, InterviewFixture.transcript)
+    XCTAssertThrowsError(try store.upsert(corrupt))
+    let stored = try XCTUnwrap(context.fetch(FetchDescriptor<StoredMeeting>()).first(where: { $0.id == id }))
+    XCTAssertEqual(stored.analysisJSON, corruptData)
+  }
+
+  @MainActor
   func testUpsertFetchAndDelete() throws {
     let schema = Schema(versionedSchema: MeetingSchemaV1.self)
     let configuration = ModelConfiguration(

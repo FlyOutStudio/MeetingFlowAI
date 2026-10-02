@@ -79,12 +79,23 @@ final class ClaudeServiceTests: XCTestCase {
       XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
       XCTAssertEqual(
         schema["required"] as? [String],
-        ["summary", "todo", "flow"]
+        ["summary", "todo", "flow", "businessInterview"]
       )
 
       let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
-      XCTAssertEqual(Set(properties.keys), ["summary", "todo", "flow"])
+      XCTAssertEqual(Set(properties.keys), ["summary", "todo", "flow", "businessInterview"])
       XCTAssertNil(properties["mermaid"])
+      let interview = try XCTUnwrap(properties["businessInterview"] as? [String: Any])
+      let interviewProperties = try XCTUnwrap(interview["properties"] as? [String: Any])
+      let items = try XCTUnwrap(interviewProperties["items"] as? [String: Any])
+      let itemSchema = try XCTUnwrap(items["items"] as? [String: Any])
+      XCTAssertEqual(itemSchema["required"] as? [String], ["section", "content", "origin", "quotes"])
+      let itemProperties = try XCTUnwrap(itemSchema["properties"] as? [String: Any])
+      XCTAssertNil(itemProperties["review"])
+      XCTAssertNil(itemProperties["humanEdited"])
+      XCTAssertNil(itemProperties["sourceTranscript"])
+      XCTAssertTrue(system.contains("権限、原因、責任、合意を推測で補完しない"))
+
 
       let todo = try XCTUnwrap(properties["todo"] as? [String: Any])
       let todoItems = try XCTUnwrap(todo["items"] as? [String: Any])
@@ -347,7 +358,7 @@ final class ClaudeServiceTests: XCTestCase {
     URLProtocolStub.handler = { _ in
       let analysis = """
         ```json
-        {"summary":"要約","todo":[],"flow":[]}
+        {"summary":"要約","todo":[],"flow":[],"businessInterview":{"items":[]}}
         ```
         """
       return Self.response(
@@ -471,6 +482,77 @@ final class ClaudeServiceTests: XCTestCase {
     )
   }
 
+  func testInterviewResponseBindsEvidenceAndIgnoresAIReview() async throws {
+    URLProtocolStub.handler = { _ in
+      let data = try InterviewFixture.aiData(quotes: ["自動化を提案します。"])
+      return Self.response(statusCode: 200, json: Self.completedResponseJSON(analysisText: String(decoding: data, as: UTF8.self)))
+    }
+    let result = try await makeService().analyze(title: "合成テスト", transcript: InterviewFixture.transcript)
+    let interview = try XCTUnwrap(result.businessInterview)
+    XCTAssertEqual(interview.sourceTranscript, InterviewFixture.transcript)
+    XCTAssertEqual(interview.items[0].review, .unreviewed)
+    XCTAssertEqual(interview.items[0].origin, .proposed)
+    XCTAssertNotNil(interview.items[0].evidence[0].range(in: interview.sourceTranscript))
+  }
+
+  func testInterviewInventedEvidenceFailsAtServiceBoundary() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      state.recordRequest()
+      let data = try InterviewFixture.aiData(quotes: ["権限を部長に委譲した"])
+      return Self.response(statusCode: 200, json: Self.completedResponseJSON(analysisText: String(decoding: data, as: UTF8.self)))
+    }
+    await assertAppError(from: {
+      try await self.makeService().analyze(title: "合成テスト", transcript: InterviewFixture.transcript)
+    }, contains: "根拠")
+    XCTAssertEqual(state.requestCount, 2)
+  }
+
+  func testMissingInterviewPayloadFailsAtServiceBoundary() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      state.recordRequest()
+      return Self.response(statusCode: 200, json: [
+        "content": [["type": "text", "text": "{\"summary\":\"有効な議事録\",\"todo\":[],\"flow\":[]}"]],
+        "stop_reason": "end_turn"
+      ])
+    }
+    await assertAppError(from: {
+      try await self.makeService().analyze(title: "合成テスト", transcript: InterviewFixture.transcript)
+    }, contains: "業務ヒアリング")
+    XCTAssertEqual(state.requestCount, 2)
+  }
+
+  func testInvalidInterviewEvidenceRecoversWithOneRetry() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      let quote = state.recordRequest() == 1 ? "原文にない引用" : "自動化を提案します。"
+      let data = try InterviewFixture.aiData(quotes: [quote])
+      return Self.response(statusCode: 200, json: Self.completedResponseJSON(analysisText: String(decoding: data, as: UTF8.self)))
+    }
+    let result = try await makeService().analyze(title: "合成テスト", transcript: InterviewFixture.transcript)
+    XCTAssertEqual(state.requestCount, 2)
+    XCTAssertEqual(result.businessInterview?.items.first?.evidence.first?.quote, "自動化を提案します。")
+    XCTAssertEqual(result.businessInterview?.items.first?.review, .unreviewed)
+  }
+
+  func testMissingInterviewPayloadRecoversWithOneRetry() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      if state.recordRequest() == 1 {
+        return Self.response(statusCode: 200, json: [
+          "content": [["type": "text", "text": "{\"summary\":\"有効な議事録\",\"todo\":[],\"flow\":[]}"]],
+          "stop_reason": "end_turn"
+        ])
+      }
+      let data = try InterviewFixture.aiData(quotes: ["自動化を提案します。"])
+      return Self.response(statusCode: 200, json: Self.completedResponseJSON(analysisText: String(decoding: data, as: UTF8.self)))
+    }
+    let result = try await makeService().analyze(title: "合成テスト", transcript: InterviewFixture.transcript)
+    XCTAssertEqual(state.requestCount, 2)
+    XCTAssertNotNil(result.businessInterview)
+  }
+
   private func makeService(apiKey: String? = "test-api-key") -> ClaudeService {
     ClaudeService(
       session: session,
@@ -542,11 +624,19 @@ final class ClaudeServiceTests: XCTestCase {
   private static func completedResponseJSON(
     analysisText: String
   ) -> [String: Any] {
-    [
+    var output = analysisText
+    if var object = (try? JSONSerialization.jsonObject(with: Data(analysisText.utf8))) as? [String: Any],
+       object["businessInterview"] == nil {
+      object["businessInterview"] = ["items": []]
+      if let data = try? JSONSerialization.data(withJSONObject: object) {
+        output = String(decoding: data, as: UTF8.self)
+      }
+    }
+    return [
       "content": [
         [
           "type": "text",
-          "text": analysisText,
+          "text": output,
         ]
       ],
       "stop_reason": "end_turn",

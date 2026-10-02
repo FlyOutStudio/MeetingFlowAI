@@ -75,4 +75,20 @@ struct MeetingRecord: Equatable, Identifiable, Sendable {
   let source: MeetingSource
   let createdAt: Date
   let updatedAt: Date
+  /// The raw analysisJSON remains in SwiftData and must not be overwritten.
+  let analysisLoadError: String?
+
+  init(id: UUID, title: String, transcript: String, analysis: MeetingAnalysis?,
+       captureMode: MeetingCaptureMode?, source: MeetingSource,
+       createdAt: Date, updatedAt: Date, analysisLoadError: String? = nil) {
+    self.id = id
+    self.title = title
+    self.transcript = transcript
+    self.analysis = analysis
+    self.captureMode = captureMode
+    self.source = source
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+    self.analysisLoadError = analysisLoadError
+  }
 }

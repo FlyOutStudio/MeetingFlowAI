@@ -347,6 +347,149 @@ final class MeetingViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testInterviewEditsSurviveRegenerationHistoryAndRestore() async throws {
+    let history = MeetingHistoryStoreStub()
+    let backup = PreviousAnalysisStoreStub()
+    let original = try InterviewFixture.analysis()
+    let id = UUID()
+    try history.upsert(MeetingRecord(id: id, title: "ヒアリング", transcript: InterviewFixture.transcript,
+      analysis: original, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date()))
+    let vm = makeViewModel(recording: RecordingServiceStub(),
+      analysis: SequencedAnalysisService([.success(try InterviewFixture.analysis())]),
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history, previousAnalysisStore: backup)
+    let item = try XCTUnwrap(vm.analysis?.businessInterview?.items.first)
+    var content = item.content
+    content.exceptions = "例外は次回確認"
+    XCTAssertTrue(vm.editInterviewItem(id: item.id, content: content, origin: .proposed, quotes: item.evidence.map(\.quote)))
+    vm.confirmInterviewItem(id: item.id)
+    let edited = try XCTUnwrap(vm.analysis)
+    XCTAssertEqual(edited.businessInterview?.items[0].review, .confirmed)
+    vm.retryAnalysis()
+    // Busy-state guards prevent an edit from racing the generation commit.
+    XCTAssertFalse(vm.editInterviewItem(id: item.id, content: item.content, origin: .agreed, quotes: item.evidence.map(\.quote)))
+    try await waitUntil("再解析が完了しませんでした") { vm.phase == .completed }
+    XCTAssertEqual(vm.analysis?.businessInterview, edited.businessInterview)
+    XCTAssertNotNil(vm.analysis?.interviewCandidate)
+    XCTAssertTrue(vm.analysis?.interviewCandidate?.items.allSatisfy { $0.review == .unreviewed } == true)
+    var regenerated = vm.analysis
+    vm.newMeeting()
+    vm.selectMeeting(id: id)
+    XCTAssertEqual(vm.analysis, regenerated)
+    // A new ViewModel reads the saved review states and pending candidate.
+    let reopened = makeViewModel(recording: RecordingServiceStub(), analysis: SequencedAnalysisService([]),
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history, previousAnalysisStore: backup)
+    XCTAssertEqual(reopened.analysis, regenerated)
+    content.exceptions = "再解析後に人が追記した確認事項"
+    XCTAssertTrue(vm.editInterviewItem(id: item.id, content: content, origin: .proposed, quotes: item.evidence.map(\.quote)))
+    vm.confirmInterviewItem(id: item.id)
+    regenerated = vm.analysis
+    vm.acceptInterviewCandidate()
+    XCTAssertNil(vm.analysis?.interviewCandidate)
+    XCTAssertEqual(vm.analysis?.businessInterview?.items.first?.review, .unreviewed)
+    vm.restorePreviousAnalysis()
+    XCTAssertEqual(vm.analysis, regenerated)
+    vm.dismissInterviewCandidate()
+    XCTAssertEqual(vm.analysis?.businessInterview, regenerated?.businessInterview)
+    XCTAssertNil(vm.analysis?.interviewCandidate)
+  }
+
+  @MainActor
+  func testFailedRegenerationRetainsInterviewAndReview() async throws {
+    let history = MeetingHistoryStoreStub()
+    var original = try InterviewFixture.analysis()
+    try original.businessInterview?.items[0].confirm(in: InterviewFixture.transcript)
+    try history.upsert(MeetingRecord(id: UUID(), title: "失敗テスト", transcript: InterviewFixture.transcript,
+      analysis: original, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date()))
+    let vm = makeViewModel(recording: RecordingServiceStub(),
+      analysis: SequencedAnalysisService([.failure(.aiAnalysis("テスト失敗"))]),
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history)
+    vm.retryAnalysis()
+    try await waitUntil("失敗が通知されませんでした") { vm.presentedError != nil }
+    XCTAssertEqual(vm.analysis, original)
+    XCTAssertEqual(try history.fetchAll().first?.analysis, original)
+    vm.restorePreviousAnalysis()
+    XCTAssertEqual(vm.analysis, original)
+  }
+
+  @MainActor
+  func testCancelledRegenerationCannotReplaceHumanInterview() async throws {
+    let history = MeetingHistoryStoreStub()
+    var original = try InterviewFixture.analysis()
+    try original.businessInterview?.items[0].confirm(in: InterviewFixture.transcript)
+    try history.upsert(MeetingRecord(id: UUID(), title: "中断テスト", transcript: InterviewFixture.transcript,
+      analysis: original, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date()))
+    let service = ControlledAnalysisService(staleAnalysis: try InterviewFixture.analysis(), freshAnalysis: original)
+    let vm = makeViewModel(recording: RecordingServiceStub(), analysis: service,
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history)
+    vm.retryAnalysis()
+    try await waitForAnalysisCalls(1, service: service, message: "解析が始まりませんでした")
+    vm.cancelProcessing()
+    try await waitUntil("キャンセルできませんでした") { vm.phase == .transcriptReady }
+    await service.releaseStaleAnalysis()
+    try await waitUntilForStaleDelivery(service)
+    for _ in 0..<10 { await Task.yield() }
+    XCTAssertEqual(vm.analysis, original)
+    XCTAssertEqual(try history.fetchAll().first?.analysis, original)
+  }
+
+  @MainActor
+  func testInterviewSaveFailureKeepsPreviousContentAndConfirmation() throws {
+    let history = MeetingHistoryStoreStub()
+    var original = try InterviewFixture.analysis()
+    try original.businessInterview?.items[0].confirm(in: InterviewFixture.transcript)
+    try history.upsert(MeetingRecord(id: UUID(), title: "保存失敗", transcript: InterviewFixture.transcript,
+      analysis: original, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date()))
+    let vm = makeViewModel(recording: RecordingServiceStub(), analysis: SequencedAnalysisService([]),
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history)
+    history.upsertError = .storage("合成テストの保存失敗")
+    let item = try XCTUnwrap(original.businessInterview?.items.first)
+    XCTAssertFalse(vm.editInterviewItem(id: item.id, content: InterviewContent(text: "変更"),
+      origin: .agreed, quotes: item.evidence.map(\.quote)))
+    XCTAssertEqual(vm.analysis, original)
+    XCTAssertNotNil(vm.presentedError)
+    XCTAssertEqual(try history.fetchAll().first?.analysis, original)
+  }
+
+  @MainActor
+  func testBackupFailurePreventsRegenerationOfHumanWork() throws {
+    let history = MeetingHistoryStoreStub()
+    let backup = PreviousAnalysisStoreStub()
+    var original = try InterviewFixture.analysis()
+    try original.businessInterview?.items[0].confirm(in: InterviewFixture.transcript)
+    try history.upsert(MeetingRecord(id: UUID(), title: "退避失敗", transcript: InterviewFixture.transcript,
+      analysis: original, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date()))
+    let vm = makeViewModel(recording: RecordingServiceStub(), analysis: SequencedAnalysisService([]),
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history, previousAnalysisStore: backup)
+    backup.saveError = .storage("合成テストの退避失敗")
+    vm.retryAnalysis()
+    XCTAssertEqual(vm.phase, .completed)
+    XCTAssertEqual(vm.analysis, original)
+    XCTAssertNotNil(vm.presentedError)
+  }
+
+  @MainActor
+  func testUnreadableAnalysisCannotBeRegeneratedOrOverwritten() throws {
+    let history = MeetingHistoryStoreStub()
+    let corrupt = MeetingRecord(id: UUID(), title: "読み取り専用", transcript: InterviewFixture.transcript,
+      analysis: nil, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date(),
+      analysisLoadError: "保存済み解析のエラー")
+    try history.upsert(corrupt)
+    let vm = makeViewModel(recording: RecordingServiceStub(), analysis: SequencedAnalysisService([]),
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history)
+    XCTAssertEqual(vm.transcript, InterviewFixture.transcript)
+    XCTAssertNotNil(vm.currentAnalysisLoadError)
+    XCTAssertFalse(vm.canRetryAnalysis)
+    XCTAssertFalse(vm.canSaveMeetingTitle)
+    XCTAssertFalse(vm.canRestorePreviousAnalysis)
+    vm.retryAnalysis()
+    vm.meetingTitle = "上書きしない"
+    vm.saveMeetingTitle()
+    XCTAssertEqual(try history.fetchAll(), [corrupt])
+    vm.newMeeting()
+    XCTAssertNil(vm.currentAnalysisLoadError)
+  }
+
+  @MainActor
   private func makeViewModel(
     recording: any RecordingServicing,
     analysis: any MeetingAnalysisGenerating,
@@ -437,12 +580,14 @@ final class MeetingViewModelTests: XCTestCase {
 @MainActor
 private final class MeetingHistoryStoreStub: MeetingHistoryStoring {
   private var records: [MeetingRecord] = []
+  var upsertError: AppError?
 
   func fetchAll() throws -> [MeetingRecord] {
     records.sorted { $0.updatedAt > $1.updatedAt }
   }
 
   func upsert(_ record: MeetingRecord) throws {
+    if let upsertError { throw upsertError }
     records.removeAll { $0.id == record.id }
     records.append(record)
   }
@@ -455,8 +600,10 @@ private final class MeetingHistoryStoreStub: MeetingHistoryStoring {
 @MainActor
 private final class PreviousAnalysisStoreStub: PreviousAnalysisStoring {
   private var analyses: [UUID: MeetingAnalysis] = [:]
+  var saveError: AppError?
 
   func save(_ analysis: MeetingAnalysis, for meetingID: UUID) throws {
+    if let saveError { throw saveError }
     analyses[meetingID] = analysis
   }
 
