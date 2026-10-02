@@ -239,7 +239,7 @@ final class MeetingAnalysisTests: XCTestCase {
     ) { error in
       XCTAssertEqual(
         error as? AppError,
-        .invalidResponse("議事録・ToDo・業務フローに有効な内容がありませんでした。")
+        .invalidResponse("議事録に有効な内容がありませんでした。")
       )
     }
   }
@@ -247,7 +247,7 @@ final class MeetingAnalysisTests: XCTestCase {
   func testAIDecoderTreatsMissingOrNullFieldsAsEmptyValues() throws {
     let source = """
       {
-        "summary": null,
+        "summary": "在庫の確認と共有の手順を見直した。",
         "todo": [
           {"title": "確認", "owner": null, "deadline": null, "priority": null},
           {"owner": "田中"}
@@ -270,6 +270,45 @@ final class MeetingAnalysisTests: XCTestCase {
     XCTAssertEqual(analysis.todo.first?.priority, .medium)
     XCTAssertEqual(analysis.flow.map(\.id), ["A", "B"])
     XCTAssertEqual(analysis.flow[1].next, [FlowTransition(to: "A", label: "")])
+  }
+
+  func testAIDecoderRejectsEmptyMinutesEvenWithTodoAndFlow() throws {
+    let summaries: [Any] = [
+      NSNull(), "", "  \n", "placeholder", "- **PLACEHOLDER**",
+      "会議内で明確になりませんでした。",
+      "placeholder\n\n## 会議の目的・背景\n- 会議内で明確になりませんでした。\n## 主な議論\n- 会議内で明確になりませんでした。",
+    ]
+    for summary in summaries {
+      var payload: [String: Any] = [
+        "summary": summary,
+        "todo": [["title": "在庫を確認する", "owner": "営業", "deadline": "", "priority": "Medium"]],
+        "flow": [["id": "A", "actor": "営業", "action": "在庫を確認する", "next": []]],
+      ]
+      for omitSummary in [false, true] {
+        if omitSummary { payload.removeValue(forKey: "summary") }
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        XCTAssertThrowsError(try MeetingAnalysis.decodeAIOutput(from: data)) { error in
+          XCTAssertEqual(error as? AppError, .invalidResponse("議事録に有効な内容がありませんでした。"))
+        }
+      }
+    }
+  }
+
+  func testStoredPlaceholderAnalysisRemainsReadableForRecovery() throws {
+    let original = MeetingAnalysis(summary: "placeholder", todo: [], flow: [
+      FlowStep(id: "A", actor: "営業", action: "在庫を確認する", next: []),
+    ])
+    let restored = try JSONDecoder().decode(MeetingAnalysis.self, from: JSONEncoder().encode(original))
+    XCTAssertEqual(restored, original)
+    XCTAssertFalse(restored.hasMeaningfulContent)
+  }
+
+  func testMinutesWithConcreteDiscussionAndUnresolvedSectionsRemainValid() throws {
+    let original = MeetingAnalysis(
+      summary: "## 主な議論\n- CSV連携で勤怠時間が誤計上される課題を確認した。\n## 決定事項\n- 会議内で明確になりませんでした。",
+      todo: [], flow: [])
+    let result = try MeetingAnalysis.decodeAIOutput(from: JSONEncoder().encode(original))
+    XCTAssertTrue(result.summary.contains("CSV連携で勤怠時間が誤計上"))
   }
 
   func testPriorityUsesSchemaRawValues() throws {

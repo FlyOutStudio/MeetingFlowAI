@@ -168,7 +168,7 @@ extension MeetingAnalysis {
     }
 
     guard analysis.hasMeaningfulContent else {
-      throw AppError.invalidResponse("議事録・ToDo・業務フローに有効な内容がありませんでした。")
+      throw AppError.invalidResponse("議事録に有効な内容がありませんでした。")
     }
 
     analysis.businessInterview = interview
@@ -176,17 +176,22 @@ extension MeetingAnalysis {
   }
 
   var hasMeaningfulContent: Bool {
-    guard todo.isEmpty, flow.isEmpty else { return true }
-
+    // ToDoやフローがあっても、議事録の本文がなければ保存・退避しない。
     let placeholder = "会議内で明確になりませんでした。"
     return summary
       .components(separatedBy: .newlines)
       .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
       .contains { line in
-        !line.isEmpty
-          && !line.hasPrefix("#")
-          && line != "- \(placeholder)"
-          && line.lowercased() != "placeholder"
+        guard !line.hasPrefix("#") else { return false }
+        var content = line
+        for prefix in ["- ", "* ", "+ "] where content.hasPrefix(prefix) {
+          content = String(content.dropFirst(prefix.count))
+          break
+        }
+        content = content.trimmingCharacters(in: CharacterSet(charactersIn: "*_` ").union(.whitespacesAndNewlines))
+        return !content.isEmpty
+          && content != placeholder
+          && content.lowercased() != "placeholder"
       }
   }
 

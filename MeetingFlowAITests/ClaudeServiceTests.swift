@@ -329,7 +329,7 @@ final class ClaudeServiceTests: XCTestCase {
         return Self.response(
           statusCode: 200,
           json: Self.completedResponseJSON(
-            analysisText: "{\"summary\":\"placeholder\",\"todo\":[],\"flow\":[]}"
+            analysisText: "{\"summary\":\"placeholder\",\"todo\":[],\"flow\":[{\"id\":\"A\",\"actor\":\"営業\",\"action\":\"在庫を確認する\",\"next\":[]}]}"
           )
         )
       }
@@ -352,6 +352,21 @@ final class ClaudeServiceTests: XCTestCase {
 
     XCTAssertEqual(state.requestCount, 2)
     XCTAssertTrue(result.summary.contains("CSV連携の課題"))
+  }
+
+  func testAnalyzeRejectsPlaceholderWithFlowAfterOnlyOneRetry() async {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      state.recordRequest()
+      return Self.response(statusCode: 200, json: Self.completedResponseJSON(
+        analysisText: "{\"summary\":\"placeholder\",\"todo\":[],\"flow\":[{\"id\":\"A\",\"actor\":\"営業\",\"action\":\"在庫を確認する\",\"next\":[]}]}"
+      ))
+    }
+    let service = makeService()
+    await assertAppError(from: {
+      try await service.analyze(title: "会議", transcript: "在庫を確認する。")
+    }, contains: "議事録に有効な内容がありません")
+    XCTAssertEqual(state.requestCount, 2)
   }
 
   func testAnalyzeAcceptsJSONCodeFence() async throws {
