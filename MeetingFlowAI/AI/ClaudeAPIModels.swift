@@ -8,6 +8,7 @@ import Foundation
 struct ClaudeAPIRequest: Encodable {
   let model: String
   let maxTokens: Int
+  let stream = true
   let system: String
   let messages: [ClaudeInputMessage]
   let outputConfig: ClaudeOutputConfiguration
@@ -15,6 +16,7 @@ struct ClaudeAPIRequest: Encodable {
   enum CodingKeys: String, CodingKey {
     case model
     case maxTokens = "max_tokens"
+    case stream
     case system
     case messages
     case outputConfig = "output_config"

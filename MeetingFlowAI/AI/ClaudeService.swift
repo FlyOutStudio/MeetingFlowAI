@@ -18,22 +18,30 @@ actor ClaudeService: MeetingAnalysisGenerating {
     string: "https://api.anthropic.com/v1/messages"
   )!
   private static let apiVersion = "2023-06-01"
-  private static let requestTimeout: TimeInterval = 120
+  private static let requestTimeout: TimeInterval = 300
+  private static let resourceTimeout: TimeInterval = 900
 
   private let session: URLSession
   private let endpoint: URL
   private let apiKeyProvider: APIKeyProvider
 
   init(
-    session: URLSession = .shared,
+    session: URLSession? = nil,
     endpoint: URL = ClaudeService.defaultEndpoint,
     apiKeyProvider: @escaping APIKeyProvider = {
       ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]
     }
   ) {
-    self.session = session
+    self.session = session ?? URLSession(configuration: Self.sessionConfiguration())
     self.endpoint = endpoint
     self.apiKeyProvider = apiKeyProvider
+  }
+
+  static func sessionConfiguration() -> URLSessionConfiguration {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = requestTimeout
+    configuration.timeoutIntervalForResource = resourceTimeout
+    return configuration
   }
 
   func analyze(title: String, transcript: String) async throws -> MeetingAnalysis {
@@ -98,19 +106,52 @@ actor ClaudeService: MeetingAnalysisGenerating {
       instructions: instructions
     )
 
-    let data: Data
-    let response: URLResponse
+    let apiResponse: ClaudeAPIResponse
     do {
-      (data, response) = try await session.data(for: request)
+      let (bytes, response) = try await session.bytes(for: request)
+      defer { bytes.task.cancel() }
+      guard let httpResponse = response as? HTTPURLResponse else {
+        throw AppError.invalidResponse("Claudeから不正なネットワーク応答を受信しました。")
+      }
+      guard (200...299).contains(httpResponse.statusCode) else {
+        // HTTPエラー本文に会議内容が含まれる可能性があるため読まずに破棄する。
+        throw httpError(statusCode: httpResponse.statusCode)
+      }
+      apiResponse = try await withTaskCancellationHandler {
+        if httpResponse.mimeType?.lowercased() == "text/event-stream" {
+          var stream = ClaudeStreamAccumulator()
+          for try await byte in bytes {
+            try checkCancellation()
+            if try stream.receive(byte: byte) { break }
+          }
+          return try stream.completedResponse()
+        } else {
+          // JSON応答との互換性を維持。部分的な応答は保存しない。
+          var data = Data()
+          for try await byte in bytes {
+            try checkCancellation()
+            data.append(byte)
+          }
+          do {
+            return try JSONDecoder().decode(ClaudeAPIResponse.self, from: data)
+          } catch {
+            throw AppError.invalidResponse("Claudeの応答形式を読み取れませんでした。")
+          }
+        }
+      } onCancel: {
+        bytes.task.cancel()
+      }
     } catch is CancellationError {
       throw AppError.cancelled
+    } catch let error as AppError {
+      throw error
     } catch let error as URLError {
       switch error.code {
       case .cancelled:
         throw AppError.cancelled
       case .timedOut:
         throw AppError.aiAnalysis(
-          "Claude APIの応答が時間内に完了しませんでした。会議内容を短くしてもう一度お試しください。"
+          "Claude APIの応答が時間内に完了しませんでした。文字起こしと既存の結果は保持しています。時間をおいてもう一度お試しください。"
         )
       case .notConnectedToInternet:
         throw AppError.aiAnalysis(
@@ -136,26 +177,6 @@ actor ClaudeService: MeetingAnalysisGenerating {
     }
 
     try checkCancellation()
-
-    guard let httpResponse = response as? HTTPURLResponse else {
-      throw AppError.invalidResponse(
-        "Claudeから不正なネットワーク応答を受信しました。"
-      )
-    }
-
-    guard (200...299).contains(httpResponse.statusCode) else {
-      // エラー本文は入力内容を含む可能性があるため、表示・ログ出力しません。
-      throw httpError(statusCode: httpResponse.statusCode)
-    }
-
-    let apiResponse: ClaudeAPIResponse
-    do {
-      apiResponse = try JSONDecoder().decode(ClaudeAPIResponse.self, from: data)
-    } catch {
-      throw AppError.invalidResponse(
-        "Claudeの応答形式を読み取れませんでした。"
-      )
-    }
 
     let analysis = try parseResponse(apiResponse, transcript: transcript)
     try checkCancellation()
@@ -200,6 +221,7 @@ actor ClaudeService: MeetingAnalysisGenerating {
     request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
     request.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
 
     do {
       request.httpBody = try JSONEncoder().encode(payload)
@@ -389,5 +411,88 @@ actor ClaudeService: MeetingAnalysisGenerating {
     \(transcript)
     </meeting_transcript>
     """
+  }
+}
+
+/// SSEの空行をイベント境界として扱い、完了済みの応答だけを解析へ渡す。
+/// 途中のJSON断片やAPIエラー本文は表示・保存しない。
+private struct ClaudeStreamAccumulator {
+  private var lineBytes = Data()
+  private var eventData = ""
+  private var texts: [Int: String] = [:]
+  private var started = false
+  private var stopped = false
+  private var stopReason: String?
+
+  mutating func receive(byte: UInt8) throws -> Bool {
+    guard byte == 10 else {
+      lineBytes.append(byte)
+      return false
+    }
+    if lineBytes.last == 13 { lineBytes.removeLast() }
+    guard let line = String(data: lineBytes, encoding: .utf8) else { throw Self.invalidFormat }
+    lineBytes.removeAll(keepingCapacity: true)
+    if line.hasPrefix("data:") {
+      var field = String(line.dropFirst(5))
+      if field.hasPrefix(" ") { field.removeFirst() }
+      eventData += field + "\n"
+      return false
+    }
+    guard line.isEmpty, !eventData.isEmpty else { return false }
+    let data = Data(eventData.utf8)
+    eventData = ""
+    let event: [String: Any]
+    do {
+      guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw Self.invalidFormat
+      }
+      event = object
+    } catch { throw Self.invalidFormat }
+    guard let type = event["type"] as? String else { throw Self.invalidFormat }
+    switch type {
+    case "message_start":
+      guard !started, event["message"] is [String: Any] else { throw Self.invalidFormat }
+      started = true
+    case "content_block_start":
+      guard started, let index = event["index"] as? Int,
+        let block = event["content_block"] as? [String: Any] else { throw Self.invalidFormat }
+      if block["type"] as? String == "text" {
+        guard let text = block["text"] as? String else { throw Self.invalidFormat }
+        texts[index] = text
+      }
+    case "content_block_delta":
+      guard started, let index = event["index"] as? Int,
+        let delta = event["delta"] as? [String: Any] else { throw Self.invalidFormat }
+      if delta["type"] as? String == "text_delta" {
+        guard texts[index] != nil, let text = delta["text"] as? String else { throw Self.invalidFormat }
+        texts[index, default: ""] += text
+      }
+    case "message_delta":
+      guard started, let delta = event["delta"] as? [String: Any] else { throw Self.invalidFormat }
+      if let reason = delta["stop_reason"] as? String { stopReason = reason }
+    case "message_stop":
+      guard started, stopReason != nil else { throw Self.invalidFormat }
+      stopped = true
+    case "error":
+      // 本文は利用者の会議内容を含み得るため、固定文のみを返す。
+      throw AppError.aiAnalysis("Claude APIの応答中にエラーが発生しました。既存の結果は変更していません。時間をおいてもう一度お試しください。")
+    default:
+      break // ping、thinking、新しいイベントは結果の本文に混ぜない。
+    }
+    return stopped
+  }
+
+  func completedResponse() throws -> ClaudeAPIResponse {
+    guard stopped else {
+      throw AppError.aiAnalysis("Claudeの応答が途中で中断されました。既存の結果は変更していません。もう一度お試しください。")
+    }
+    return ClaudeAPIResponse(
+      content: texts.keys.sorted().map { ClaudeContentBlock(type: "text", text: texts[$0]) },
+      stopReason: stopReason
+    )
+  }
+
+  private static var invalidFormat: AppError {
+    .invalidResponse("Claudeのストリーミング応答形式を読み取れませんでした。")
   }
 }

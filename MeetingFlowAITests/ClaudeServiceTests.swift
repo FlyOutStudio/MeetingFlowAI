@@ -10,6 +10,7 @@ final class ClaudeServiceTests: XCTestCase {
     super.setUp()
 
     URLProtocolStub.handler = nil
+    URLProtocolStub.finishLoading = true
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [URLProtocolStub.self]
     session = URLSession(configuration: configuration)
@@ -29,7 +30,8 @@ final class ClaudeServiceTests: XCTestCase {
         "https://api.anthropic.com/v1/messages"
       )
       XCTAssertEqual(request.httpMethod, "POST")
-      XCTAssertEqual(request.timeoutInterval, 120)
+      XCTAssertEqual(request.timeoutInterval, 300)
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/event-stream")
       XCTAssertEqual(
         request.value(forHTTPHeaderField: "x-api-key"),
         "test-api-key"
@@ -51,6 +53,7 @@ final class ClaudeServiceTests: XCTestCase {
 
       XCTAssertEqual(json["model"] as? String, "claude-sonnet-5")
       XCTAssertEqual(json["max_tokens"] as? Int, 16_384)
+      XCTAssertEqual(json["stream"] as? Bool, true)
       XCTAssertNil(json["store"])
       XCTAssertFalse(String(data: body, encoding: .utf8)?.contains("test-api-key") ?? true)
 
@@ -441,7 +444,9 @@ final class ClaudeServiceTests: XCTestCase {
   }
 
   func testAnalyzeMapsURLSessionTimeoutToJapaneseAppError() async {
+    let state = AnalysisRetryTestState()
     URLProtocolStub.handler = { _ in
+      state.recordRequest()
       throw URLError(.timedOut)
     }
 
@@ -453,6 +458,138 @@ final class ClaudeServiceTests: XCTestCase {
       },
       contains: "時間内に完了"
     )
+    XCTAssertEqual(state.requestCount, 1)
+  }
+
+  func testDefaultSessionExtendsIdleAndTotalTimeouts() {
+    let configuration = ClaudeService.sessionConfiguration()
+    XCTAssertEqual(configuration.timeoutIntervalForRequest, 300)
+    XCTAssertEqual(configuration.timeoutIntervalForResource, 900)
+  }
+
+  func testAnalyzeStreamsJapaneseJSONAcrossChunksAndIgnoresPings() async throws {
+    URLProtocolStub.handler = { _ in
+      let events = try Self.streamEvents(summary: "二重入力を減らし、通知を必須にすることで合意した。")
+      return try Self.streamResponse(events)
+    }
+    let result = try await makeService().analyze(title: "会議", transcript: "通知を必須にすることで合意した。")
+    XCTAssertTrue(result.summary.contains("二重入力を減らし"))
+    XCTAssertTrue(result.summary.contains("## 会議の目的・背景"))
+  }
+
+  func testAnalyzeRejectsEvenValidJSONWithoutStreamCompletionAndDoesNotRetry() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      state.recordRequest()
+      var events = try Self.streamEvents(summary: "在庫確認の手順を見直した。")
+      events.removeLast()
+      return try Self.streamResponse(events)
+    }
+    await assertAppError(from: {
+      try await self.makeService().analyze(title: "会議", transcript: "在庫確認の手順を見直した。")
+    }, contains: "途中で中断")
+    XCTAssertEqual(state.requestCount, 1)
+  }
+
+  func testAnalyzePreservesStopReasonFromStreamingResponse() async throws {
+    URLProtocolStub.handler = { _ in
+      try Self.streamResponse(Self.streamEvents(summary: "途中の本文", stopReason: "max_tokens"))
+    }
+    await assertAppError(from: {
+      try await self.makeService().analyze(title: "会議", transcript: "会議内容")
+    }, contains: "出力上限")
+  }
+
+  func testAnalyzeStreamErrorDoesNotExposeServerMessageOrRetry() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      state.recordRequest()
+      return try Self.streamResponse([
+        ["type": "error", "error": ["type": "overloaded_error", "message": "SECRET_TRANSCRIPT"]],
+      ])
+    }
+    do {
+      _ = try await makeService().analyze(title: "会議", transcript: "会議内容")
+      XCTFail("ストリーム内エラーは拒否すること")
+    } catch let error as AppError {
+      XCTAssertTrue(error.localizedDescription.contains("応答中にエラー"))
+      XCTAssertFalse(error.localizedDescription.contains("SECRET_TRANSCRIPT"))
+    }
+    XCTAssertEqual(state.requestCount, 1)
+  }
+
+  func testAnalyzeCanCancelWhileWaitingForNextStreamEvent() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.finishLoading = false
+    URLProtocolStub.handler = { _ in
+      state.recordRequest()
+      return try Self.streamResponse([["type": "message_start", "message": ["content": []]]])
+    }
+    let service = makeService()
+    let task = Task { try await service.analyze(title: "会議", transcript: "会議内容") }
+    for _ in 0..<100 where state.requestCount == 0 {
+      try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    XCTAssertEqual(state.requestCount, 1)
+    try await Task.sleep(nanoseconds: 50_000_000)
+    task.cancel()
+    await assertAppError(from: { try await task.value }, contains: "キャンセル")
+  }
+
+  func testAnalyzeRetriesCompletedPlaceholderStreamOnlyOnce() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      let attempt = state.recordRequest()
+      return try Self.streamResponse(Self.streamEvents(summary: attempt == 1 ? "placeholder" : "通知方法を次回確認する。"))
+    }
+    let result = try await makeService().analyze(title: "会議", transcript: "通知方法を次回確認する。")
+    XCTAssertEqual(state.requestCount, 2)
+    XCTAssertTrue(result.summary.contains("通知方法を次回確認する。"))
+  }
+
+  func testAnalyzeRejectsMalformedStreamWithoutExposingBody() async throws {
+    URLProtocolStub.handler = { _ in
+      let response = try Self.streamResponse([]).0
+      return (response, Data("data: SECRET_TRANSCRIPT\n\n".utf8))
+    }
+    do {
+      _ = try await makeService().analyze(title: "会議", transcript: "会議内容")
+      XCTFail("不正なイベントは拒否すること")
+    } catch let error as AppError {
+      XCTAssertTrue(error.localizedDescription.contains("ストリーミング応答形式"))
+      XCTAssertFalse(error.localizedDescription.contains("SECRET_TRANSCRIPT"))
+    }
+  }
+
+  private static func streamEvents(summary: String, stopReason: String = "end_turn") throws -> [[String: Any]] {
+    let json = try completedResponseJSON(analysis: ["summary": summary, "todo": [], "flow": []])
+    let content = try XCTUnwrap(json["content"] as? [[String: Any]])
+    let text = try XCTUnwrap(content.first?["text"] as? String)
+    let split = text.index(text.startIndex, offsetBy: text.count / 2)
+    return [
+      ["type": "message_start", "message": ["content": []]],
+      ["type": "ping"],
+      ["type": "future_event", "extra": "ignored"],
+      ["type": "content_block_start", "index": 0, "content_block": ["type": "text", "text": ""]],
+      ["type": "content_block_delta", "index": 0, "delta": ["type": "text_delta", "text": String(text[..<split])]],
+      ["type": "content_block_delta", "index": 0, "delta": ["type": "text_delta", "text": String(text[split...])]],
+      ["type": "content_block_stop", "index": 0],
+      ["type": "message_delta", "delta": ["stop_reason": stopReason]],
+      ["type": "message_stop"],
+    ]
+  }
+
+  private static func streamResponse(_ events: [[String: Any]]) throws -> (HTTPURLResponse, Data) {
+    var body = ": keepalive\r\n\r\n"
+    for event in events {
+      let json = try JSONSerialization.data(withJSONObject: event, options: [.prettyPrinted])
+      body += "event: \(event["type"] as? String ?? "unknown")\r\n"
+      body += String(decoding: json, as: UTF8.self).components(separatedBy: "\n")
+        .map { "data: " + $0 }.joined(separator: "\r\n") + "\r\n\r\n"
+    }
+    let response = try XCTUnwrap(HTTPURLResponse(url: URL(string: "https://api.anthropic.com/v1/messages")!,
+      statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream; charset=utf-8"]))
+    return (response, Data(body.utf8))
   }
 
   func testAnalyzeMapsAPIKeyProviderFailureWithoutSendingRequest() async {
@@ -677,6 +814,7 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
   typealias Handler = @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
 
   nonisolated(unsafe) static var handler: Handler?
+  nonisolated(unsafe) static var finishLoading = true
 
   override class func canInit(with request: URLRequest) -> Bool {
     true
@@ -698,8 +836,11 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
     do {
       let (response, data) = try handler(request)
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-      client?.urlProtocol(self, didLoad: data)
-      client?.urlProtocolDidFinishLoading(self)
+      // Deliberately split UTF-8 characters and SSE frames across network chunks.
+      for offset in stride(from: 0, to: data.count, by: 7) {
+        client?.urlProtocol(self, didLoad: data.subdata(in: offset..<min(offset + 7, data.count)))
+      }
+      if Self.finishLoading { client?.urlProtocolDidFinishLoading(self) }
     } catch {
       client?.urlProtocol(self, didFailWithError: error)
     }

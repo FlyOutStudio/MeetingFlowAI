@@ -277,6 +277,12 @@ private struct ControlPanelView: View {
         VStack(alignment: .leading, spacing: 10) {
           ProgressView()
             .controlSize(.small)
+          if viewModel.phase == .generating {
+            Text("長い会議の解析には数分かかる場合があります。文字起こしと既存の結果は保持されます。")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Button("処理をキャンセル", role: .cancel) {
             viewModel.cancelProcessing()
           }
