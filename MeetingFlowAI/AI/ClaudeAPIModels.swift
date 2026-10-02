@@ -9,6 +9,7 @@ struct ClaudeAPIRequest: Encodable {
   let model: String
   let maxTokens: Int
   let stream = true
+  let thinking = ClaudeThinkingConfiguration()
   let system: String
   let messages: [ClaudeInputMessage]
   let outputConfig: ClaudeOutputConfiguration
@@ -17,10 +18,16 @@ struct ClaudeAPIRequest: Encodable {
     case model
     case maxTokens = "max_tokens"
     case stream
+    case thinking
     case system
     case messages
     case outputConfig = "output_config"
   }
+}
+
+struct ClaudeThinkingConfiguration: Encodable {
+  let type = "adaptive"
+  let display = "omitted"
 }
 
 struct ClaudeInputMessage: Encodable {
@@ -30,6 +37,7 @@ struct ClaudeInputMessage: Encodable {
 
 struct ClaudeOutputConfiguration: Encodable {
   let format: ClaudeJSONSchemaFormat
+  let effort = "medium"
 }
 
 struct ClaudeJSONSchemaFormat: Encodable {
@@ -140,10 +148,41 @@ struct StringJSONSchema: Encodable {
 struct ClaudeAPIResponse: Decodable {
   let content: [ClaudeContentBlock]
   let stopReason: String?
+  let usage: ClaudeAPIUsage?
+
+  init(content: [ClaudeContentBlock], stopReason: String?, usage: ClaudeAPIUsage? = nil) {
+    self.content = content
+    self.stopReason = stopReason
+    self.usage = usage
+  }
 
   enum CodingKeys: String, CodingKey {
     case content
     case stopReason = "stop_reason"
+    case usage
+  }
+}
+
+/// APIの総出力数には思考も含まれる。思考本文や応答本文は診断に記録しない。
+struct ClaudeAPIUsage: Decodable {
+  var inputTokens: Int?
+  var outputTokens: Int?
+  var cacheReadInputTokens: Int?
+  var cacheCreationInputTokens: Int?
+
+  enum CodingKeys: String, CodingKey {
+    case inputTokens = "input_tokens"
+    case outputTokens = "output_tokens"
+    case cacheReadInputTokens = "cache_read_input_tokens"
+    case cacheCreationInputTokens = "cache_creation_input_tokens"
+  }
+
+  mutating func update(from data: [String: Any]) {
+    // message_deltaのusageは累積値。加算せず最新値へ更新する。
+    if let value = data["input_tokens"] as? Int { inputTokens = value }
+    if let value = data["output_tokens"] as? Int { outputTokens = value }
+    if let value = data["cache_read_input_tokens"] as? Int { cacheReadInputTokens = value }
+    if let value = data["cache_creation_input_tokens"] as? Int { cacheCreationInputTokens = value }
   }
 }
 

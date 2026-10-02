@@ -52,8 +52,12 @@ final class ClaudeServiceTests: XCTestCase {
       )
 
       XCTAssertEqual(json["model"] as? String, "claude-sonnet-5")
-      XCTAssertEqual(json["max_tokens"] as? Int, 16_384)
+      XCTAssertEqual(json["max_tokens"] as? Int, 32_768)
       XCTAssertEqual(json["stream"] as? Bool, true)
+      let thinking = try XCTUnwrap(json["thinking"] as? [String: Any])
+      XCTAssertEqual(thinking["type"] as? String, "adaptive")
+      XCTAssertEqual(thinking["display"] as? String, "omitted")
+      XCTAssertNil(thinking["budget_tokens"])
       XCTAssertNil(json["store"])
       XCTAssertFalse(String(data: body, encoding: .utf8)?.contains("test-api-key") ?? true)
 
@@ -75,6 +79,7 @@ final class ClaudeServiceTests: XCTestCase {
       XCTAssertTrue(system.contains("JSON以外は出力しない"))
 
       let outputConfig = try XCTUnwrap(json["output_config"] as? [String: Any])
+      XCTAssertEqual(outputConfig["effort"] as? String, "medium")
       let format = try XCTUnwrap(outputConfig["format"] as? [String: Any])
       XCTAssertEqual(format["type"] as? String, "json_schema")
 
@@ -255,8 +260,10 @@ final class ClaudeServiceTests: XCTestCase {
   }
 
   func testAnalyzeMapsMaxTokensToJapaneseAppError() async {
+    let state = AnalysisRetryTestState()
     URLProtocolStub.handler = { _ in
-      Self.response(
+      state.recordRequest()
+      return Self.response(
         statusCode: 200,
         json: [
           "content": [],
@@ -273,6 +280,7 @@ final class ClaudeServiceTests: XCTestCase {
       },
       contains: "出力上限"
     )
+    XCTAssertEqual(state.requestCount, 1)
   }
 
   func testAnalyzeMapsMalformedStructuredOutputToJapaneseAppError() async {
@@ -561,6 +569,104 @@ final class ClaudeServiceTests: XCTestCase {
     }
   }
 
+  func testStreamDiagnosticsUsesCumulativeUsageAndNeverRecordsThinkingOrText() async throws {
+    let diagnostics = ClaudeDiagnosticsTestState()
+    URLProtocolStub.handler = { _ in
+      var events = try Self.streamEvents(summary: "PRIVATE_RESPONSEを確認した。")
+      events[0] = ["type": "message_start", "message": ["content": [], "usage": ["input_tokens": 123, "output_tokens": 1, "cache_read_input_tokens": 45, "cache_creation_input_tokens": 67]]]
+      events.insert(contentsOf: [
+        ["type": "content_block_start", "index": 1, "content_block": ["type": "thinking", "thinking": "PRIVATE_THINKING"]],
+        ["type": "content_block_delta", "index": 1, "delta": ["type": "thinking_delta", "thinking": "PRIVATE_THINKING"]],
+        ["type": "content_block_stop", "index": 1],
+        ["type": "message_delta", "delta": [:], "usage": ["output_tokens": 50]],
+      ], at: 1)
+      events[events.count - 2] = ["type": "message_delta", "delta": ["stop_reason": "end_turn"], "usage": ["output_tokens": 80]]
+      return try Self.streamResponse(events)
+    }
+    let service = makeService(apiKey: "PRIVATE_KEY", diagnosticsHandler: { diagnostics.record($0) })
+    let result = try await service.analyze(title: "PRIVATE_TITLE", transcript: "PRIVATE_TRANSCRIPT")
+    XCTAssertTrue(result.summary.contains("PRIVATE_RESPONSE"))
+    let message = try XCTUnwrap(diagnostics.messages.first)
+    XCTAssertEqual(diagnostics.messages.count, 1)
+    XCTAssertTrue(message.contains("input_tokens=123 output_tokens=80"))
+    XCTAssertTrue(message.contains("cache_read_input_tokens=45 cache_creation_input_tokens=67"))
+    XCTAssertTrue(message.contains("thinking_block_seen=true"))
+    for secret in ["PRIVATE_RESPONSE", "PRIVATE_THINKING", "PRIVATE_KEY", "PRIVATE_TITLE", "PRIVATE_TRANSCRIPT"] {
+      XCTAssertFalse(message.contains(secret))
+    }
+  }
+
+  func testThinkingOnlyTokenLimitIsLoggedWithoutRetryOrInvalidJSONMessage() async throws {
+    let state = AnalysisRetryTestState()
+    let diagnostics = ClaudeDiagnosticsTestState()
+    URLProtocolStub.handler = { _ in
+      state.recordRequest()
+      return try Self.streamResponse([
+        ["type": "message_start", "message": ["content": [], "usage": ["input_tokens": 200]]],
+        ["type": "content_block_start", "index": 0, "content_block": ["type": "thinking", "thinking": "PRIVATE_THINKING"]],
+        ["type": "content_block_stop", "index": 0],
+        ["type": "message_delta", "delta": ["stop_reason": "max_tokens"], "usage": ["output_tokens": 32_768]],
+        ["type": "message_stop"],
+      ])
+    }
+    let service = makeService(diagnosticsHandler: { diagnostics.record($0) })
+    do {
+      _ = try await service.analyze(title: "会議", transcript: "会議内容")
+      XCTFail("完成していない結果を受け入れないこと")
+    } catch let error as AppError {
+      guard case .aiAnalysis = error else { return XCTFail("JSON不備ではなく出力上限として扱うこと") }
+      XCTAssertTrue(error.localizedDescription.contains("出力上限"))
+      XCTAssertTrue(error.localizedDescription.contains("既存の結果は保持"))
+      XCTAssertFalse(error.localizedDescription.contains("不正な応答"))
+    }
+    XCTAssertEqual(state.requestCount, 1)
+    let message = try XCTUnwrap(diagnostics.messages.first)
+    XCTAssertTrue(message.contains("stop_reason=max_tokens"))
+    XCTAssertTrue(message.contains("output_tokens=32768"))
+    XCTAssertTrue(message.contains("text_utf16=0 thinking_block_seen=true"))
+    XCTAssertFalse(message.contains("PRIVATE_THINKING"))
+  }
+
+  func testJSONResponseUsageIsRecordedWithoutResponseBody() async throws {
+    let diagnostics = ClaudeDiagnosticsTestState()
+    URLProtocolStub.handler = { _ in
+      var response = Self.completedResponseJSON(analysisText: "{\"summary\":\"PRIVATE_RESPONSE\",\"todo\":[],\"flow\":[]}")
+      response["usage"] = ["input_tokens": 321, "output_tokens": 654]
+      return Self.response(statusCode: 200, json: response)
+    }
+    _ = try await makeService(diagnosticsHandler: { diagnostics.record($0) }).analyze(title: "PRIVATE_TITLE", transcript: "PRIVATE_TRANSCRIPT")
+    let message = try XCTUnwrap(diagnostics.messages.first)
+    XCTAssertTrue(message.contains("input_tokens=321 output_tokens=654"))
+    XCTAssertFalse(message.contains("PRIVATE_"))
+  }
+
+  func testDiagnosticSummaryTreatsMissingOrInvalidUsageAsUnknownAndSanitizesReason() throws {
+    let response = try JSONDecoder().decode(ClaudeAPIResponse.self, from: Data("{\"content\":[],\"stop_reason\":\"PRIVATE_REASON\",\"usage\":{\"input_tokens\":-9}}".utf8))
+    let message = ClaudeService.diagnosticSummary(response, attempt: 1, elapsedMilliseconds: 20)
+    XCTAssertTrue(message.contains("stop_reason=unknown input_tokens=-1 output_tokens=-1"))
+    XCTAssertFalse(message.contains("PRIVATE_REASON"))
+    let oldResponse = try JSONDecoder().decode(ClaudeAPIResponse.self, from: Data("{\"content\":[],\"stop_reason\":\"end_turn\"}".utf8))
+    XCTAssertNil(oldResponse.usage)
+  }
+
+  func testCorrectiveRetryKeepsBudgetEffortAndProducesSeparateDiagnostics() async throws {
+    let state = AnalysisRetryTestState()
+    let diagnostics = ClaudeDiagnosticsTestState()
+    URLProtocolStub.handler = { request in
+      let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(Self.bodyData(from: request))) as? [String: Any])
+      XCTAssertEqual(json["max_tokens"] as? Int, 32_768)
+      XCTAssertEqual((json["thinking"] as? [String: Any])?["type"] as? String, "adaptive")
+      XCTAssertEqual((json["output_config"] as? [String: Any])?["effort"] as? String, "medium")
+      XCTAssertTrue((json["system"] as? String)?.contains("同じ意味の議論や項目は統合") ?? false)
+      return try Self.streamResponse(Self.streamEvents(summary: state.recordRequest() == 1 ? "placeholder" : "通知方法を次回確認する。"))
+    }
+    _ = try await makeService(diagnosticsHandler: { diagnostics.record($0) }).analyze(title: "会議", transcript: "通知方法を次回確認する。")
+    XCTAssertEqual(state.requestCount, 2)
+    XCTAssertEqual(diagnostics.messages.count, 2)
+    XCTAssertTrue(diagnostics.messages[0].contains("attempt=1"))
+    XCTAssertTrue(diagnostics.messages[1].contains("attempt=2"))
+  }
+
   private static func streamEvents(summary: String, stopReason: String = "end_turn") throws -> [[String: Any]] {
     let json = try completedResponseJSON(analysis: ["summary": summary, "todo": [], "flow": []])
     let content = try XCTUnwrap(json["content"] as? [[String: Any]])
@@ -705,10 +811,11 @@ final class ClaudeServiceTests: XCTestCase {
     XCTAssertNotNil(result.businessInterview)
   }
 
-  private func makeService(apiKey: String? = "test-api-key") -> ClaudeService {
+  private func makeService(apiKey: String? = "test-api-key", diagnosticsHandler: @escaping ClaudeService.DiagnosticsHandler = { _ in }) -> ClaudeService {
     ClaudeService(
       session: session,
-      apiKeyProvider: { apiKey }
+      apiKeyProvider: { apiKey },
+      diagnosticsHandler: diagnosticsHandler
     )
   }
 
@@ -807,6 +914,23 @@ final class ClaudeServiceTests: XCTestCase {
     )!
     let data = try! JSONSerialization.data(withJSONObject: json)
     return (response, data)
+  }
+}
+
+private final class ClaudeDiagnosticsTestState: @unchecked Sendable {
+  private let lock = NSLock()
+  private var entries: [String] = []
+
+  func record(_ message: String) {
+    lock.lock()
+    defer { lock.unlock() }
+    entries.append(message)
+  }
+
+  var messages: [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return entries
   }
 }
 

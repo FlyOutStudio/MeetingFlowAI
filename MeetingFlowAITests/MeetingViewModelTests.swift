@@ -192,6 +192,34 @@ final class MeetingViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testLongTranscriptAndHumanReviewSurviveOutputTokenLimit() async throws {
+    let history = MeetingHistoryStoreStub()
+    let backup = PreviousAnalysisStoreStub()
+    let id = UUID()
+    var original = try InterviewFixture.analysis()
+    try original.businessInterview?.items[0].confirm(in: InterviewFixture.transcript)
+    let transcript = InterviewFixture.transcript + (1...800).map { "\n議題\($0): 申込書の受領、台帳入力、入力後の通知、在庫確認の手順を確認しました。未確認の権限は次回確認します。" }.joined()
+    try history.upsert(MeetingRecord(id: id, title: "長時間会議", transcript: transcript,
+      analysis: original, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date()))
+    let service = SequencedAnalysisService([.failure(.aiAnalysis("AIの思考・生成が出力上限に達しました。"))])
+    let vm = makeViewModel(recording: RecordingServiceStub(), analysis: service,
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history, previousAnalysisStore: backup)
+    vm.retryAnalysis()
+    try await waitUntil("上限到達後に再試行可能になりませんでした。") {
+      vm.phase == .transcriptReady && vm.presentedError != nil
+    }
+    XCTAssertGreaterThan(transcript.count, 40_000)
+    XCTAssertEqual(vm.transcript, transcript)
+    XCTAssertEqual(vm.analysis, original)
+    XCTAssertEqual(try history.fetchAll().first?.transcript, transcript)
+    XCTAssertEqual(try history.fetchAll().first?.analysis, original)
+    XCTAssertEqual(try backup.load(for: id), original)
+    XCTAssertTrue(vm.canRetryAnalysis)
+    let calls = await service.numberOfCalls()
+    XCTAssertEqual(calls, 1)
+  }
+
+  @MainActor
   func testRetryFromStoredPlaceholderDoesNotOverwriteRecoverableBackup() async throws {
     let history = MeetingHistoryStoreStub()
     let backup = PreviousAnalysisStoreStub()

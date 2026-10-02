@@ -1,5 +1,21 @@
 # 変更履歴
 
+## 1.5.3 - 2026-10-03
+
+### Fixed
+
+- Sonnet 5のadaptive thinkingとmedium effortを明示し、思考と本文の合計出力上限を16,384から32,768トークンへ拡張。原文は全文保持し、重要事項を落とさず重複説明を統合する指示を追加
+- 出力上限を「不正な応答／JSON」の不備と混同せず、思考・生成の上限として案内。上限到達の自動再送はせず、原文・既存結果・人の確認状態を保持
+- 完了応答の停止理由・APIのトークン数・本文の長さ・思考ブロック有無を端末内診断へ記録。APIキー、会議タイトル、本文、引用、思考本文、任意のAPI文字列は記録しない
+
+### 変更対象と設計
+
+- `ClaudeAPIModels.swift`: thinking／effort、任意のusage。保存用JSON Schemaは変更なし
+- `ClaudeService.swift`: 出力枠、簡潔化指示、SSEの累積usage、許可した値のみの診断と上限エラー。[Claude公式の思考・出力枠の指針](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)に基づき、思考を完全に無効化せずmediumへ調整する
+- `ClaudeServiceTests.swift`・`MeetingViewModelTests.swift`: 要求設定、思考のみで枠を使い切る応答、累積値・互換JSON・安全なログ・再要求設定・長文と人の確認状態の保全を検証
+- `project.pbxproj`: 1.5.3／ビルド22。`README.md`・`OPERATIONS.md`・`ARCHITECTURE.md`・`TODO.md`は設定・費用上限・ログの確認手順を更新。環境構築変更がないため`SETUP.md`は据え置き
+- リスク: 最大出力を広げることで最大API利用料が増える可能性がある。APIは思考と本文の厳密なトークン内訳を返さず、実会議で起きた消費内訳は過去に遡って取得できない。実会議の抽出品質は別途確認が必要
+
 ## 1.5.2 - 2026-10-02
 
 ### Fixed
