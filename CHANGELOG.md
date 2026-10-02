@@ -11,8 +11,18 @@
 ### Verification
 
 - 内容不足とToDo・フロー併存、一度だけの再要求、バックアップ保全と復元、具体的な議論と未決事項の併存を回帰テストに追加
-- GitHub ActionsのmacOS環境で単体テストとUniversal配布ビルド成功
-- 実APIが内容不足を返す原因と長時間会議の抽出品質は未検証。会議本文を外部へ送らず検証する
+- GitHub ActionsのmacOS環境で96件の単体テストとUniversal配布ビルド成功
+- 配布版の別保存領域で98文字の架空会議を実Claude APIで解析し、具体的な議事録、担当者付きToDo、四分類のヒアリングと原文一致の引用を確認。APIキーは出力せず、実会議は送信していない
+- 更新・バックアップからの復元・再起動後の保持を実機確認。元の文字起こし・タイトルと、復元対象以外の解析結果に変更がないことを照合
+- 実APIが長時間会議で内容不足を返した原因と、その抽出品質は未検証
+
+### 変更対象と設計
+
+- `MeetingAnalysis.swift`: summary自身の本文を検証。再生成前の退避にも同じ判定を使い、空の結果からのバックアップ上書きを防止
+- `ClaudeService.swift`: 議事録専用エラーを一度だけの再要求対象にし、通常・再要求の指示でsummary省略を禁止
+- `MeetingAnalysisTests.swift`・`ClaudeServiceTests.swift`・`MeetingViewModelTests.swift`: 受理判定、再要求回数、既存結果保持と復元を検証
+- `project.pbxproj`: 配布バージョンを1.5.1、ビルドを20へ更新
+- `ARCHITECTURE.md`・`OPERATIONS.md`・`TODO.md`・本履歴: 判定方針、復旧手順、検証範囲を記録。概要・環境構築には変更がないため`README.md`と`SETUP.md`は据え置き
 
 ## 1.5.0 - 2026-10-02
 
