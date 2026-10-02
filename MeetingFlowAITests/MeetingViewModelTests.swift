@@ -165,6 +165,34 @@ final class MeetingViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testRetryFromStoredPlaceholderDoesNotOverwriteRecoverableBackup() async throws {
+    let history = MeetingHistoryStoreStub()
+    let backup = PreviousAnalysisStoreStub()
+    let id = UUID()
+    let placeholder = Self.analysis(summary: "placeholder\n\n## 主な議論\n- 会議内で明確になりませんでした。")
+    let recoverable = Self.analysis(summary: "在庫確認の手順を見直すことで合意した。")
+    try history.upsert(MeetingRecord(id: id, title: "復旧対象", transcript: "在庫確認の会議内容",
+      analysis: placeholder, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date()))
+    try backup.save(recoverable, for: id)
+    let vm = makeViewModel(recording: RecordingServiceStub(),
+      analysis: SequencedAnalysisService([.failure(.invalidResponse("議事録に有効な内容がありませんでした。"))]),
+      speechFactory: SpeechServiceFactoryStub([]), historyStore: history, previousAnalysisStore: backup)
+
+    vm.retryAnalysis()
+    try await waitUntil("再生成失敗後の状態へ遷移しませんでした。") {
+      vm.phase == .transcriptReady && vm.presentedError != nil
+    }
+    XCTAssertEqual(vm.analysis, placeholder)
+    XCTAssertEqual(try history.fetchAll().first?.analysis, placeholder)
+    XCTAssertEqual(try backup.load(for: id), recoverable)
+
+    vm.restorePreviousAnalysis()
+    XCTAssertEqual(vm.analysis, recoverable)
+    XCTAssertEqual(try history.fetchAll().first?.analysis, recoverable)
+    XCTAssertEqual(vm.transcript, "在庫確認の会議内容")
+  }
+
+  @MainActor
   func testCancelledGenerationCannotOverwriteNewSession() async throws {
     let recording = RecordingServiceStub()
     let firstSpeech = SpeechServiceStub()
