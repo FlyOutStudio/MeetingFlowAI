@@ -1,5 +1,16 @@
 # Business interview MVP handoff
 
+## Release preparation update (2026-10-02)
+
+The cloud implementation is being shipped as v1.5.0 (build 19) through PR #1.
+The earlier Linux verification limitations below describe the initial handoff,
+not the current release status. macOS Actions run 36994934088 passed unit tests
+and the Universal Ad Hoc build on the cloud revision. Release preparation adds
+one bounded retry for missing interview payloads or invalid evidence, regression
+tests, and updates README, ARCHITECTURE, OPERATIONS, TODO and CHANGELOG.
+SETUP is unchanged because no new tools, credentials or environment are required.
+No real analysis API call or recording upload is used for release verification.
+
 ## Scope and baseline
 
 Implemented on `codex/business-interview-mvp`, based on

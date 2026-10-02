@@ -19,7 +19,9 @@ flowchart LR
   Keychain["macOS Keychain\nANTHROPIC_API_KEY"] --> Claude["ClaudeService"]
   Generator --> Claude
   Claude --> API["Claude Messages API\nclaude-sonnet-5"]
-  API --> Analysis["MeetingAnalysis\nsummary / todo / flow"]
+  API --> Analysis["MeetingAnalysis\nsummary / todo / flow / businessInterview"]
+  Analysis --> Review["根拠照合・人による編集と確認"]
+  Review --> Store
   Analysis --> Store
   Analysis --> PreviousAnalysis["再生成前の解析バックアップ\nApplication Support"]
   PreviousAnalysis --> UI
@@ -34,13 +36,13 @@ flowchart LR
 1. `MeetingViewModel`が会議タイトルと確定済み文字起こしを`MeetingAnalysisGenerating.analyze`へ渡します。
 2. `ClaudeService`がKeychainを優先してAnthropic APIキーを取得します。
 3. Claude Messages APIへsystem prompt、user message、`MeetingAnalysis`用JSON Schemaを送信します。
-4. Structured Outputsのtext blockを`MeetingAnalysis`へdecodeし、AI出力に限って議事録の必須見出しを補完します。内容不足または壊れたJSONの場合だけ、保存前に具体的な修正指示で1回再要求します。
+4. Structured Outputsのtext blockを`MeetingAnalysis`へdecodeし、AI出力に限って議事録の必須見出しを補完します。内容不足・壊れたJSON・ヒアリング欠落・根拠不一致は、保存前に具体的な修正指示で1回再要求します。
 5. `flow`からアプリ側でMermaidを生成します。ClaudeにはMermaid生成を任せません。
 
 ## 設計判断
 
 - Anthropic SDKは追加せず`URLSession`を使用し、依存追加と移行差分を抑えています。
-- Structured Outputsで既存JSON Schemaを維持し、UI・Export・Mermaid生成への影響をなくしています。
+- Structured OutputsのJSON Schemaに業務ヒアリングを追加し、既存summary・todo・flowの形式を維持しています。
 - 議事録は目的・背景、主な議論、決定事項、未決事項・確認事項、次の対応を必須見出しとし、実行事項だけをToDoへ重複表示します。
 - APIキーはKeychainへ保存し、保存値を画面へ再表示しません。
 - 旧OpenAIキーとAnthropicキーを混同しないよう、Keychain accountを`ANTHROPIC_API_KEY`へ変更しています。
@@ -51,6 +53,14 @@ flowchart LR
 - 出力不足の自動再要求は1回だけとし、認証・通信・利用上限・会議本文の上限エラーは再要求しません。失敗時は既存の解析結果を保持します。
 - 初期スキーマを`MeetingSchemaV1`として版管理し、将来の項目変更ではMigrationStageを追加して履歴を引き継ぎます。
 - 保存処理は`MeetingHistoryStoring`境界で分離し、ViewModelの単体テストではインメモリ実装へ差し替えます。
+
+## 業務ヒアリングの境界
+
+- `BusinessInterview`は抽出時の原文スナップショットと項目を保持します。各項目の引用は空・不一致・複数箇所一致を拒否し、アプリがUTF-16位置とUUIDを計算します。引用の存在検証は解釈の正しさを保証しません。
+- AIに許す値は分類・内容・会議での合意／提案／AI提案・引用だけです。AIからの確認済み状態は受け入れず、明示的な人の操作で確認します。編集後は未確認に戻します。
+- 人が編集・確認した項目が一つでもあれば、再生成時にヒアリング全体を保持し、`interviewCandidate`に新候補を保存します。採用前に直近の解析を退避します。複数世代の履歴は保持しません。
+- 保存済みJSON内の任意項目追加で旧履歴と互換にし、SwiftDataスキーマは変更しません。破損した解析は行単位で読み取り専用にし、保存・再生成・復元による上書きを防ぎます。
+- JSONは候補と原文を含む完全データ、Markdownは確認状態と根拠を含む共有用出力です。Mermaid／draw.ioは従来の`flow`のみを使用します。
 
 ## 依存関係と変更時の確認
 
@@ -65,7 +75,7 @@ flowchart LR
 
 ## 現在の進捗
 
-- 完了: Claude Messages API、Structured Outputs、SwiftData履歴、既存音声読み込み、APIキー設定
+- 完了: Claude Messages API、Structured Outputs、SwiftData履歴、既存音声読み込み、APIキー設定、根拠付き業務ヒアリングと人の確認・編集保護
 - 未完了: 実Anthropic APIによるE2E確認、長時間の既存音声による実機確認
 - 次の作業: `TODO.md`の高優先度項目
 - リスク: モデル廃止、長時間会議の入力上限、端末故障に備えた履歴全体のバックアップ未実装

@@ -496,18 +496,23 @@ final class ClaudeServiceTests: XCTestCase {
   }
 
   func testInterviewInventedEvidenceFailsAtServiceBoundary() async throws {
+    let state = AnalysisRetryTestState()
     URLProtocolStub.handler = { _ in
+      state.recordRequest()
       let data = try InterviewFixture.aiData(quotes: ["権限を部長に委譲した"])
       return Self.response(statusCode: 200, json: Self.completedResponseJSON(analysisText: String(decoding: data, as: UTF8.self)))
     }
     await assertAppError(from: {
       try await self.makeService().analyze(title: "合成テスト", transcript: InterviewFixture.transcript)
     }, contains: "根拠")
+    XCTAssertEqual(state.requestCount, 2)
   }
 
   func testMissingInterviewPayloadFailsAtServiceBoundary() async throws {
+    let state = AnalysisRetryTestState()
     URLProtocolStub.handler = { _ in
-      Self.response(statusCode: 200, json: [
+      state.recordRequest()
+      return Self.response(statusCode: 200, json: [
         "content": [["type": "text", "text": "{\"summary\":\"有効な議事録\",\"todo\":[],\"flow\":[]}"]],
         "stop_reason": "end_turn"
       ])
@@ -515,6 +520,37 @@ final class ClaudeServiceTests: XCTestCase {
     await assertAppError(from: {
       try await self.makeService().analyze(title: "合成テスト", transcript: InterviewFixture.transcript)
     }, contains: "業務ヒアリング")
+    XCTAssertEqual(state.requestCount, 2)
+  }
+
+  func testInvalidInterviewEvidenceRecoversWithOneRetry() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      let quote = state.recordRequest() == 1 ? "原文にない引用" : "自動化を提案します。"
+      let data = try InterviewFixture.aiData(quotes: [quote])
+      return Self.response(statusCode: 200, json: Self.completedResponseJSON(analysisText: String(decoding: data, as: UTF8.self)))
+    }
+    let result = try await makeService().analyze(title: "合成テスト", transcript: InterviewFixture.transcript)
+    XCTAssertEqual(state.requestCount, 2)
+    XCTAssertEqual(result.businessInterview?.items.first?.evidence.first?.quote, "自動化を提案します。")
+    XCTAssertEqual(result.businessInterview?.items.first?.review, .unreviewed)
+  }
+
+  func testMissingInterviewPayloadRecoversWithOneRetry() async throws {
+    let state = AnalysisRetryTestState()
+    URLProtocolStub.handler = { _ in
+      if state.recordRequest() == 1 {
+        return Self.response(statusCode: 200, json: [
+          "content": [["type": "text", "text": "{\"summary\":\"有効な議事録\",\"todo\":[],\"flow\":[]}"]],
+          "stop_reason": "end_turn"
+        ])
+      }
+      let data = try InterviewFixture.aiData(quotes: ["自動化を提案します。"])
+      return Self.response(statusCode: 200, json: Self.completedResponseJSON(analysisText: String(decoding: data, as: UTF8.self)))
+    }
+    let result = try await makeService().analyze(title: "合成テスト", transcript: InterviewFixture.transcript)
+    XCTAssertEqual(state.requestCount, 2)
+    XCTAssertNotNil(result.businessInterview)
   }
 
   private func makeService(apiKey: String? = "test-api-key") -> ClaudeService {
