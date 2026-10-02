@@ -169,7 +169,7 @@ final class MeetingViewModelTests: XCTestCase {
     let history = MeetingHistoryStoreStub()
     let backup = PreviousAnalysisStoreStub()
     let id = UUID()
-    let transcript = (1...700).map { "議題\($0): 営業が申込書を受け取り台帳へ入力する手順を見直します。二重入力が課題で、通知方法は次回確認します。" }.joined(separator: "\n")
+    let transcript = (1...800).map { "議題\($0): 営業が申込書を受け取り台帳へ入力する手順を見直します。二重入力が課題で、通知方法は次回確認します。" }.joined(separator: "\n")
     let original = Self.analysis(summary: "二重入力を減らす運用を検討した。")
     try history.upsert(MeetingRecord(id: id, title: "長時間会議", transcript: transcript,
       analysis: original, captureMode: nil, source: .importedAudio, createdAt: Date(), updatedAt: Date()))
